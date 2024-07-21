@@ -8,8 +8,8 @@
 
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css" />
-    <script src="https://cdn.tiny.cloud/1/hig1x5mbm0n2pf4r7aoepels1lrh2o3n7em35rshwsvb7jee/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+{{--    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css" />--}}
+{{--    <script src="https://cdn.tiny.cloud/1/hig1x5mbm0n2pf4r7aoepels1lrh2o3n7em35rshwsvb7jee/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>--}}
 
     @filepondScripts
     @vite(['resources/css/app.css', 'resources/js/app.js'])
