@@ -13,10 +13,12 @@ use Mary\Traits\Toast;
 use Spatie\LivewireFilepond\WithFilePond;
 use Livewire\Attributes\Validate;
 use Illuminate\Support\Facades\DB;
+use Livewire\Attributes\On;
+
 
 
 new class extends Component {
-    use Toast, WithPagination, WithFilePond;
+    use Toast, WithPagination, WithFilePond, WithFileUploads;
 
     public FolderForm $folderForm;
     public FileForm $fileForm;
@@ -27,10 +29,12 @@ new class extends Component {
     public array $sortBy = ['column' => 'id', 'direction' => 'desc'];
     public array $breadcrumbs = [];
     public string $selectedTab = 'all';
+    public bool $submitFile = false;
+
 
     public string $name;
 
-    #[Validate(['file.*' => 'file|max:1024'])]
+    #[Validate(['file.*' => 'max:1024'])]
     public array $file = [];
 
     public bool $addFile = false;
@@ -84,7 +88,8 @@ new class extends Component {
         return $collection; // Adjust the pagination as needed
     }
 
-    public function selectTab($tab){
+    public function selectTab($tab)
+    {
         $this->selectedTab = $tab;
         $this->reset(['selected']);
     }
@@ -95,6 +100,7 @@ new class extends Component {
         return [
             'folderFiles' => $this->mergedData(),
             'headers' => $this->headers(),
+            'formattedJson' => $this->formattedArray(),
         ];
     }
 
@@ -102,7 +108,7 @@ new class extends Component {
     public function headers()
     {
         return [
-            ['key' => 'select', 'label' => '#', 'class' => 'w-1', 'dataFiles' => $this->mergedData(), 'sortable' => false],
+            ['key' => 'select', 'label' => '#', 'class' => 'w-1'],
 //            ['key' => 'id', 'label' => '#', 'class' => 'w-1'],
             ['key' => 'name', 'label' => 'Name', 'class' => 'w-64'],
             ['key' => 'owner', 'label' => 'Owner', 'class' => 'hidden lg:table-cell'],
@@ -153,7 +159,7 @@ new class extends Component {
     public function bulkDelete()
     {
         foreach ($this->selected as $item) {
-            list($type,$id) = explode('-',$item);
+            list($type, $id) = explode('-', $item);
 
             if ($type === 'folder') {
                 Folder::destroy($id);
@@ -179,11 +185,32 @@ new class extends Component {
         }
     }
 
-    public function updated($property): void
+
+//    public function updating($property, $value)
+//    {
+//        if ($property === 'file') {
+//            // Reset the submitFile flag when files are updated (upload starts)
+//            $this->submitFile = false;
+//        }
+//    }
+
+
+    public function updated($property)
     {
         if (!is_array($property) && $property != "") {
             $this->resetPage();
         }
+        if ($property === 'file') {
+                $this->submitFile = true;
+        }
+    }
+
+    public function formattedArray()
+    {
+        $formattedArray = $this->mergedData()->map(function ($item) {
+            return $item['type'] . '-' . $item['id'];
+        })->toArray();
+        return json_encode($formattedArray);
     }
 
     public function selectAll()
@@ -212,23 +239,43 @@ new class extends Component {
     public function saveFile()
     {
         $this->validate();
+
+        // Retrieve existing file names for the current folder
+        $existingFileNames = File::where('folder_id', $this->currentFolder->id)
+            ->pluck('name')
+            ->toArray();
+
+        // Process each file
         if ($this->file) {
             foreach ($this->file as $item) {
-                $itemName = $item->getClientOriginalName();
-                $url = $item->storeAs($this->currentFolder->id, $itemName);
+                $originalName = $item->getClientOriginalName();
+                $name = pathinfo($originalName, PATHINFO_FILENAME);
+                $extension = $item->getClientOriginalExtension();
+                $newName = $originalName;
+
+                // Check if the file name exists and rename if necessary
+                $counter = 1;
+                while (in_array($newName, $existingFileNames)) {
+                    $newName = $name . " ($counter)." . $extension;
+                    $counter++;
+                }
+
+                $url = $item->storeAs($this->currentFolder->id, $newName);
                 File::create([
-                    'name' => $itemName,
+                    'name' => $newName,
                     'user_id' => Auth::id(),
                     'folder_id' => $this->currentFolder->id,
                     'path' => "/storage/$url",
                 ]);
             }
         }
-//        $this->reset(['file','addFile']);
 
-        $this->redirect(url()->previous(),true);
+        // Reset file inputs if needed
+        $this->reset(['file', 'addFile']);
 
-        $this->success('Files added successfully','yeah');
+        // Redirect and success message
+        $this->redirect(url()->previous(), true);
+        $this->success('Files added successfully', 'yeah');
 
     }
 
@@ -236,6 +283,9 @@ new class extends Component {
     {
         $this->reset('file');
     }
+
+
+
 
 };
 ?>
@@ -273,50 +323,85 @@ new class extends Component {
 
     <x-card :title="$currentFolder->name">
 
-        <div class="join" >
-            <x-button wire:click="selectTab('files')" class="btn btn-outline btn-sm {{$selectedTab == 'files' ? 'btn-active':''}}  join-item rounded-l-full" icon="o-document" spinner responsive>
+        <div class="join">
+            <x-button wire:click="selectTab('files')"
+                      class="btn btn-outline btn-sm {{$selectedTab == 'files' ? 'btn-active':''}}  join-item rounded-l-full"
+                      icon="o-document" spinner responsive>
                 Files
             </x-button>
-            <x-button wire:click="selectTab('all')" class="btn btn-outline btn-sm {{$selectedTab == 'all' ? 'btn-active':''}} join-item"  icon="o-document" spinner responsive>
+            <x-button wire:click="selectTab('all')"
+                      class="btn btn-outline btn-sm {{$selectedTab == 'all' ? 'btn-active':''}} join-item"
+                      icon="o-document" spinner responsive>
                 All
             </x-button>
-            <x-button wire:click="selectTab('folders')" class="btn btn-outline btn-sm {{$selectedTab == 'folders' ? 'btn-active':''}}  join-item rounded-r-full" icon="o-folder" spinner responsive>
+            <x-button wire:click="selectTab('folders')"
+                      class="btn btn-outline btn-sm {{$selectedTab == 'folders' ? 'btn-active':''}}  join-item rounded-r-full"
+                      icon="o-folder" spinner responsive>
                 Folders
             </x-button>
         </div>
 
 
-
         <div class="divider"></div>
 
 
-        <template x-if="$wire.selected.length > 0">
-            <div class="flex justify-between">
-                <x-button class="btn-xs" spinner>
-                    <span x-text="$wire.selected.length"></span>
-                    items selected
-                </x-button>
+        <div x-data="{
+                selected: @entangle('selected'),
+                isSelected:false,
+                addAllItems() {
+                    let items = JSON.parse(@js($formattedJson));
+                    if (Array.isArray(items)) {
+                        items.forEach(item => this.selected.push(item));
+                    } else {
+                        console.error('Parsed items is not an array:', items);
+                        // Convert object to array
+                        items = Object.values(items);
+                        items.forEach(item => this.selected.push(item));
+                    }
+                    this.isSelected = true;
+                },
+                unselectAll() {
+                    this.selected = [];
+                    this.isSelected = false;
+                }
+            }">
+            <template x-if="$wire.selected.length > 0">
+                <div class="flex justify-between">
+                    <x-button class="btn-xs" spinner>
+                        <span x-text="$wire.selected.length"></span>
+                        items selected
+                    </x-button>
 
-                <div class="flex justify-around">
-                    <x-button wire:click="selectAll" spinner
-                              class="btn-primary btn-outline btn-xs">
-                        Select All
-                    </x-button>
-                    <div class="divider m-0 divider-horizontal"></div>
-                    <x-button wire:click="unselectAll" spinner
-                              class="btn-error btn-outline btn-xs">
-                        Unselect All
-                    </x-button>
+                    <div class="flex justify-around">
+                        <template x-if="!isSelected">
+                            <x-button
+                                @click="addAllItems"
+
+                                {{--                        wire:click="selectAll" --}}
+                                spinner
+                                class="btn-primary btn-outline btn-xs">
+                                Select All
+                            </x-button>
+                        </template>
+
+                        <div class="divider m-0 divider-horizontal"></div>
+                        <x-button
+                            @click="unselectAll"
+                            {{--                        wire:click="unselectAll" --}}
+                            spinner
+                            class="btn-error btn-outline btn-xs">
+                            Unselect All
+                        </x-button>
+                    </div>
+
                 </div>
 
-            </div>
-
-        </template>
-
+            </template>
+        </div>
 
 
         @if(count($folderFiles) != 0)
-            <x-table :headers="$headers" :rows="$folderFiles" class="table-xs" :sort-by="$sortBy" >
+            <x-table :headers="$headers" :rows="$folderFiles" class="table-xs" :sort-by="$sortBy">
 
                 @scope('header_select', $folderFile)
                 @endscope
@@ -327,7 +412,7 @@ new class extends Component {
                     type="checkbox"
                     class="checkbox checkbox-sm checkbox-primary"
                     wire:model="selected"
-                    value="{{ $folderFile['type'] }}-{{ $folderFile['id'] }}" />
+                    value="{{ $folderFile['type'] }}-{{ $folderFile['id'] }}"/>
                 @endscope
 
                 @scope('cell_name', $folderFile)
@@ -364,7 +449,7 @@ new class extends Component {
             </x-table>
 
         @else
-            <x-alert title="No files here." description="Click New button to add Folders or Upload Files"
+            <x-alert title="No items here." description="Click New button to add Folders or Upload Files"
                      class="justify-items-center text-center" icon="o-exclamation-triangle">
             </x-alert>
         @endif
@@ -392,26 +477,34 @@ new class extends Component {
     </x-modal>
 
 
-    {{--ADD File MODAL--}}
-    <x-modal wire:model="addFile" title="Upload File" box-class="w-2/3">
+{{--    ADD File MODAL--}}
+    <x-modal wire:model="addFile" title="Upload File" box-class="w-4/5 m-auto">
         <x-form wire:submit="saveFile" no-separator>
-
+            <x-hr />
             <x-filepond::upload wire:model="file"
+                                type="file"
                                 allow-reorder
                                 item-insert-interval="0"
                                 multiple
-                                x-ref="filepondInput"
+                                drop-on-page
+                                required
+                                drop-on-element="false"
             />
 
-            @error('file.*') <span class="error">{{ $message }}</span> @enderror
+            @error("file.*")<x-alert :title="$message" icon="o-exclamation-triangle"/>@enderror
 
-            <x-slot:actions>
+            <div class="flex justify-end">
                 <x-button label="Cancel" @click="$wire.addFile = false;$wire.cancelModal()"/>
-                <x-button type="submit" label="Confirm" class="btn-primary" spinner="saveFile"
-{{--                          @click="$refs.filepondInput.remove()"--}}
-                          @click="console.log($refs.filepondInput)"
-                />
-            </x-slot:actions>
+                <button class="btn btn-primary">
+                    <span wire:loading.remove>Upload</span>
+                    <span wire:loading>Uploading</span>
+                    <span><x-loading wire:loading class="loading-dots" /></span>
+                </button>
+            </div>
+{{--            <x-slot:actions>--}}
+{{--                <x-button label="Cancel" @click="$wire.addFile = false;$wire.cancelModal()"/>--}}
+{{--                <x-button wire:loading.remove type="submit" label="Upload" class="btn-primary" spinner="file" />--}}
+{{--            </x-slot:actions>--}}
         </x-form>
     </x-modal>
 
@@ -420,67 +513,29 @@ new class extends Component {
 </div>
 
 
+
 @push('scripts')
-{{--<script>--}}
-{{--    function tableHandler() {--}}
-{{--        return {--}}
-{{--            isSelected: false,--}}
 
-{{--            initialize() {--}}
-{{--                // Ensure isSelected is correctly initialized on component load--}}
-{{--                this.isSelected = false;--}}
-{{--            },--}}
+{{--    <script>--}}
+{{--        document.addEventListener('livewire:init',function (){--}}
+{{--            Livewire.hook('commit', ({ component, commit, respond, succeed, fail }) => {--}}
+{{--                // Runs immediately before a commit's payload is sent to the server...--}}
+{{--                Livewire.dispatch('uploading')--}}
+{{--                /*dispatch livewire event*/--}}
 
-{{--            toggleSelectAllFiles($wire, filesJson) {--}}
-{{--                let files;--}}
-{{--                try {--}}
-{{--                    files = JSON.parse(filesJson);--}}
-{{--                } catch (e) {--}}
-{{--                    console.error("Failed to parse JSON:", e);--}}
-{{--                    return;--}}
-{{--                }--}}
+{{--                respond(() => {--}}
+{{--                    // Runs after a response is received but before it's processed...--}}
+{{--                })--}}
 
-{{--                // Convert object to array if needed--}}
-{{--                if (!Array.isArray(files)) {--}}
-{{--                    files = Object.values(files);--}}
-{{--                }--}}
+{{--                succeed(({ snapshot, effect }) => {--}}
+{{--                    // Runs after a successful response is received and processed--}}
+{{--                    // with a new snapshot and list of effects...--}}
+{{--                })--}}
 
-{{--                if (this.isSelected) {--}}
-{{--                    // Clear the $wire array if it is already selected--}}
-{{--                    $wire.length = 0;--}}
-{{--                } else {--}}
-{{--                    // Clear the $wire array first to ensure it's empty before adding new items--}}
-{{--                    $wire.length = 0;--}}
-
-{{--                    // Process each file and push the formatted string into $wire--}}
-{{--                    files.forEach(file => {--}}
-{{--                        // Create the formatted string "type-id"--}}
-{{--                        const formattedString = `${file.type}-${file.id}`;--}}
-
-{{--                        // Push the formatted string into the $wire array--}}
-{{--                        $wire.push(formattedString);--}}
-{{--                    });--}}
-{{--                }--}}
-
-{{--                // Toggle the isSelected state--}}
-{{--                this.isSelected = !this.isSelected;--}}
-
-{{--                // Log the $wire array to see the result--}}
-{{--                console.log($wire);--}}
-{{--            }--}}
-{{--        }--}}
-{{--    }--}}
-    {{--        document.addEventListener('livewire:init',function (){--}}
-    {{--            Livewire.hook('commit', ({ component, commit,succeed }) => {--}}
-    {{--                // Alpine.start();--}}
-    {{--                succeed(({ snapshot, effect }) => {--}}
-
-
-    {{--                    // Runs after a successful response is received and processed--}}
-    {{--                    // with a new snapshot and list of effects...--}}
-    {{--                })--}}
-    {{--                // Runs before commit payloads are collected and sent to the server...--}}
-    {{--            })--}}
-    {{--        })--}}
-{{--</script>--}}
+{{--                fail(() => {--}}
+{{--                    // Runs if some part of the request failed...--}}
+{{--                })--}}
+{{--            })--}}
+{{--        })--}}
+{{--    </script>--}}
 @endpush
