@@ -14,7 +14,9 @@ use Spatie\LivewireFilepond\WithFilePond;
 use Livewire\Attributes\Validate;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\On;
-
+use Illuminate\Support\Facades\Storage;
+use Spatie\PdfToImage\Pdf;
+use thiagoalessio\TesseractOCR\TesseractOCR;
 
 
 new class extends Component {
@@ -30,6 +32,7 @@ new class extends Component {
     public array $breadcrumbs = [];
     public string $selectedTab = 'all';
     public bool $submitFile = false;
+    public string $uploadStatusMessage = 'test';
 
 
     public string $name;
@@ -44,6 +47,11 @@ new class extends Component {
     {
         $this->currentFolder = Folder::findOrFail($id);
         $this->buildBreadcrumbs();
+    }
+
+    #[On('statusMessage')]
+    public function updateUploadMessage($message){
+        $this->uploadStatusMessage = $message;
     }
 
 
@@ -69,7 +77,8 @@ new class extends Component {
                 ->select('files.*', 'users.name as owner', DB::raw("'file' as type"))
                 ->where('folder_id', $this->currentFolder->id ?? null)
                 ->join('users', 'files.user_id', '=', 'users.id')
-                ->when($this->search, fn($q) => $q->where('files.name', 'like', "%$this->search%"))
+                ->when($this->search, fn($q) => $q->where('files.name', 'like', "%$this->search%")
+                    ->orWhere('files.contents', 'like', "%$this->search%"))
                 ->get()
                 ->toArray();
         }
@@ -108,7 +117,7 @@ new class extends Component {
     public function headers()
     {
         return [
-            ['key' => 'select', 'label' => '#', 'class' => 'w-1'],
+            ['key' => 'select', 'label' => '#', 'class' => 'w-1', 'sortable' => false],
 //            ['key' => 'id', 'label' => '#', 'class' => 'w-1'],
             ['key' => 'name', 'label' => 'Name', 'class' => 'w-64'],
             ['key' => 'owner', 'label' => 'Owner', 'class' => 'hidden lg:table-cell'],
@@ -201,7 +210,7 @@ new class extends Component {
             $this->resetPage();
         }
         if ($property === 'file') {
-                $this->submitFile = true;
+            $this->submitFile = true;
         }
     }
 
@@ -236,7 +245,7 @@ new class extends Component {
         $this->success('All folders unselected.');
     }
 
-    public function saveFile()
+    /*public function saveFile()
     {
         $this->validate();
 
@@ -261,10 +270,17 @@ new class extends Component {
                 }
 
                 $url = $item->storeAs($this->currentFolder->id, $newName);
+
+                $tesseract = new TesseractOCR(Storage::path($url));
+
+                $fileContent = $tesseract->run();
+
+
                 File::create([
                     'name' => $newName,
                     'user_id' => Auth::id(),
                     'folder_id' => $this->currentFolder->id,
+                    'contents' => $fileContent,
                     'path' => "/storage/$url",
                 ]);
             }
@@ -277,14 +293,94 @@ new class extends Component {
         $this->redirect(url()->previous(), true);
         $this->success('Files added successfully', 'yeah');
 
+    }*/
+
+    public function saveFile()
+    {
+        $this->validate();
+
+        // Retrieve existing file names for the current folder
+        $existingFileNames = File::where('folder_id', $this->currentFolder->id)
+            ->pluck('name')
+            ->toArray();
+
+        // Process each file
+        if ($this->file) {
+            foreach ($this->file as $item) {
+                $originalName = $item->getClientOriginalName();
+                $name = pathinfo($originalName, PATHINFO_FILENAME);
+                $extension = $item->getClientOriginalExtension();
+                $newName = $originalName;
+
+//                $this->dispatch('statusMessage',"Processing file: $originalName");
+
+                $this->uploadStatusMessage = "Processing File: $originalName";
+
+                sleep(2);
+
+
+                // Check if the file name exists and rename if necessary
+                $counter = 1;
+                while (in_array($newName, $existingFileNames)) {
+                    $newName = $name . " ($counter)." . $extension;
+                    $counter++;
+                }
+
+                $url = $item->storeAs($this->currentFolder->id, $newName);
+
+                // Process the file with Tesseract OCR
+                $fileContent = '';
+
+                if ($extension === 'pdf') {
+                    // Convert PDF to images
+                    $pdf = new \Spatie\PdfToImage\Pdf(Storage::path($url));
+                    $outputDirectory = 'public/temp_images/' . pathinfo($newName, PATHINFO_FILENAME);
+
+                    // Ensure the output directory exists
+                    if (!Storage::exists($outputDirectory)) {
+                        Storage::makeDirectory($outputDirectory);
+                    }
+
+                    // Loop through each page of the PDF and process with Tesseract OCR
+                    for ($pageNumber = 1; $pageNumber <= $pdf->pageCount(); $pageNumber++) {
+                        $outputPath = storage_path('app/' . $outputDirectory . "/page-{$pageNumber}.jpg");
+                        $pdf->selectPage($pageNumber)->save($outputPath);
+
+                        $tesseract = new TesseractOCR($outputPath);
+                        $fileContent .= $tesseract->run() . "\n";
+                    }
+
+                    // Clean up temporary images
+                    Storage::deleteDirectory($outputDirectory);
+                } else {
+                    // Process image directly with Tesseract OCR
+                    $tesseract = new TesseractOCR(Storage::path($url));
+                    $fileContent = $tesseract->run();
+                }
+
+                File::create([
+                    'name' => $newName,
+                    'user_id' => Auth::id(),
+                    'folder_id' => $this->currentFolder->id,
+                    'contents' => $fileContent,
+                    'path' => "/storage/$url",
+                ]);
+            }
+        }
+
+        // Reset file inputs if needed
+        $this->reset(['file', 'addFile']);
+
+        // Redirect and success message
+        $this->redirect(url()->previous(), true);
+        $this->success('Files added successfully', 'yeah');
     }
+
 
     public function cancelModal()
     {
         $this->reset('file');
     }
-
-
 
 
 };
@@ -477,10 +573,12 @@ new class extends Component {
     </x-modal>
 
 
-{{--    ADD File MODAL--}}
+    {{--    ADD File MODAL--}}
     <x-modal wire:model="addFile" title="Upload File" box-class="w-4/5 m-auto">
         <x-form wire:submit="saveFile" no-separator>
-            <x-hr />
+{{--            <div>{{$uploadStatusMessage}}</div>--}}
+            <div x-text="$wire.uploadStatusMessage"></div>
+            <x-hr/>
             <x-filepond::upload wire:model="file"
                                 type="file"
                                 allow-reorder
@@ -491,23 +589,23 @@ new class extends Component {
                                 drop-on-element="false"
             />
 
-            @error("file.*")<x-alert :title="$message" icon="o-exclamation-triangle"/>@enderror
+            @error("file.*")
+            <x-alert :title="$message" icon="o-exclamation-triangle"/>@enderror
 
             <div class="flex justify-end">
                 <x-button label="Cancel" @click="$wire.addFile = false;$wire.cancelModal()"/>
                 <button class="btn btn-primary">
                     <span wire:loading.remove>Upload</span>
                     <span wire:loading>Uploading</span>
-                    <span><x-loading wire:loading class="loading-dots" /></span>
+                    <span><x-loading wire:loading class="loading-dots"/></span>
                 </button>
             </div>
-{{--            <x-slot:actions>--}}
-{{--                <x-button label="Cancel" @click="$wire.addFile = false;$wire.cancelModal()"/>--}}
-{{--                <x-button wire:loading.remove type="submit" label="Upload" class="btn-primary" spinner="file" />--}}
-{{--            </x-slot:actions>--}}
+            {{--            <x-slot:actions>--}}
+            {{--                <x-button label="Cancel" @click="$wire.addFile = false;$wire.cancelModal()"/>--}}
+            {{--                <x-button wire:loading.remove type="submit" label="Upload" class="btn-primary" spinner="file" />--}}
+            {{--            </x-slot:actions>--}}
         </x-form>
     </x-modal>
-
 
 
 </div>
@@ -516,26 +614,29 @@ new class extends Component {
 
 @push('scripts')
 
-{{--    <script>--}}
-{{--        document.addEventListener('livewire:init',function (){--}}
-{{--            Livewire.hook('commit', ({ component, commit, respond, succeed, fail }) => {--}}
-{{--                // Runs immediately before a commit's payload is sent to the server...--}}
-{{--                Livewire.dispatch('uploading')--}}
-{{--                /*dispatch livewire event*/--}}
-
-{{--                respond(() => {--}}
-{{--                    // Runs after a response is received but before it's processed...--}}
-{{--                })--}}
-
-{{--                succeed(({ snapshot, effect }) => {--}}
-{{--                    // Runs after a successful response is received and processed--}}
-{{--                    // with a new snapshot and list of effects...--}}
-{{--                })--}}
-
-{{--                fail(() => {--}}
-{{--                    // Runs if some part of the request failed...--}}
-{{--                })--}}
-{{--            })--}}
-{{--        })--}}
-{{--    </script>--}}
+        <script>
+            document.addEventListener('livewire:init',function (){
+                Livewire.on('statusMessage',(e) =>{
+                   console.log(e)
+                });
+                // Livewire.hook('commit', ({ component, commit, respond, succeed, fail }) => {
+                //     // Runs immediately before a commit's payload is sent to the server...
+                //     Livewire.dispatch('uploading')
+                //     /*dispatch livewire event*/
+                //
+                //     respond(() => {
+                //         // Runs after a response is received but before it's processed...
+                //     })
+                //
+                //     succeed(({ snapshot, effect }) => {
+                //         // Runs after a successful response is received and processed
+                //         // with a new snapshot and list of effects...
+                //     })
+                //
+                //     fail(() => {
+                //         // Runs if some part of the request failed...
+                //     })
+                // })
+            })
+        </script>
 @endpush

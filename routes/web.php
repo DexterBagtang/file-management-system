@@ -25,5 +25,6 @@ Route::middleware('auth')->group(function () {
     // ... more
 
     Volt::route('/','folders.index');
+    Volt::route('/ocrr','index');
     Volt::route('/folders/{id}/show','folders.show');
 });
