@@ -17,6 +17,7 @@ use Livewire\Attributes\On;
 use Illuminate\Support\Facades\Storage;
 use Spatie\PdfToImage\Pdf;
 use thiagoalessio\TesseractOCR\TesseractOCR;
+use thiagoalessio\TesseractOCR\UnsuccessfulCommandException;
 
 
 new class extends Component {
@@ -32,12 +33,12 @@ new class extends Component {
     public array $breadcrumbs = [];
     public string $selectedTab = 'all';
     public bool $submitFile = false;
-    public string $uploadStatusMessage = 'test';
+    public string $uploadStatusMessage = '';
 
 
     public string $name;
 
-    #[Validate(['file.*' => 'max:1024'])]
+    #[Validate(['file.*' => 'max:10024'])]
     public array $file = [];
 
     public bool $addFile = false;
@@ -48,12 +49,6 @@ new class extends Component {
         $this->currentFolder = Folder::findOrFail($id);
         $this->buildBreadcrumbs();
     }
-
-    #[On('statusMessage')]
-    public function updateUploadMessage($message){
-        $this->uploadStatusMessage = $message;
-    }
-
 
     public function mergedData()
     {
@@ -112,7 +107,6 @@ new class extends Component {
             'formattedJson' => $this->formattedArray(),
         ];
     }
-
 
     public function headers()
     {
@@ -195,15 +189,6 @@ new class extends Component {
     }
 
 
-//    public function updating($property, $value)
-//    {
-//        if ($property === 'file') {
-//            // Reset the submitFile flag when files are updated (upload starts)
-//            $this->submitFile = false;
-//        }
-//    }
-
-
     public function updated($property)
     {
         if (!is_array($property) && $property != "") {
@@ -212,6 +197,7 @@ new class extends Component {
         if ($property === 'file') {
             $this->submitFile = true;
         }
+
     }
 
     public function formattedArray()
@@ -245,137 +231,183 @@ new class extends Component {
         $this->success('All folders unselected.');
     }
 
-    /*public function saveFile()
-    {
-        $this->validate();
+//    public function saveFile()
+//    {
+//        $this->validate();
+//
+//        // Retrieve existing file names for the current folder
+//        $existingFileNames = File::where('folder_id', $this->currentFolder->id)
+//            ->pluck('name')
+//            ->toArray();
+//
+//        // Process each file
+//        if ($this->file) {
+//            foreach ($this->file as $item) {
+//                $originalName = $item->getClientOriginalName();
+//                $name = pathinfo($originalName, PATHINFO_FILENAME);
+//                $extension = $item->getClientOriginalExtension();
+//                $newName = $originalName;
+//
+//                $this->uploadStatusMessage = "Processing File: $originalName";
+//
+//                sleep(3);
+//
+//                // Check if the file name exists and rename if necessary
+//                $counter = 1;
+//                while (in_array($newName, $existingFileNames)) {
+//                    $newName = $name . " ($counter)." . $extension;
+//                    $counter++;
+//                }
+//
+//                $url = $item->storeAs($this->currentFolder->id, $newName);
+//
+//                // Process the file with Tesseract OCR
+//                $fileContent = '';
+//
+//                if ($extension === 'pdf') {
+//                    // Convert PDF to images
+//                    $pdf = new \Spatie\PdfToImage\Pdf(Storage::path($url));
+//                    $outputDirectory = dirname(Storage::path($url));
+//                    $baseFileName = pathinfo($newName, PATHINFO_FILENAME);
+//
+//                    // Loop through each page of the PDF and process with Tesseract OCR
+//                    for ($pageNumber = 1; $pageNumber <= $pdf->pageCount(); $pageNumber++) {
+//                        $outputPath = $outputDirectory . "/{$baseFileName}_page-{$pageNumber}.jpg";
+//                        $pdf->selectPage($pageNumber)->save($outputPath);
+//
+//                        $tesseract = new TesseractOCR($outputPath);
+//                        $fileContent .= $tesseract->run() . "\n";
+//
+//                        // Delete the image after processing
+//                        unlink($outputPath);
+//                    }
+//                } else {
+//                    // Process image directly with Tesseract OCR
+//                    $tesseract = new TesseractOCR(Storage::path($url));
+//                    $fileContent = $tesseract->run();
+//                }
+//
+//                File::create([
+//                    'name' => $newName,
+//                    'user_id' => Auth::id(),
+//                    'folder_id' => $this->currentFolder->id,
+//                    'contents' => $fileContent,
+//                    'path' => "/storage/$url",
+//                ]);
+//            }
+//        }
+//
+//        // Reset file inputs if needed
+//        $this->reset(['file', 'addFile']);
+//
+//        // Redirect and success message
+//        $this->redirect(url()->previous(), true);
+//        $this->success('Files added successfully', 'yeah');
+//    }
 
-        // Retrieve existing file names for the current folder
-        $existingFileNames = File::where('folder_id', $this->currentFolder->id)
-            ->pluck('name')
-            ->toArray();
-
-        // Process each file
-        if ($this->file) {
-            foreach ($this->file as $item) {
-                $originalName = $item->getClientOriginalName();
-                $name = pathinfo($originalName, PATHINFO_FILENAME);
-                $extension = $item->getClientOriginalExtension();
-                $newName = $originalName;
-
-                // Check if the file name exists and rename if necessary
-                $counter = 1;
-                while (in_array($newName, $existingFileNames)) {
-                    $newName = $name . " ($counter)." . $extension;
-                    $counter++;
-                }
-
-                $url = $item->storeAs($this->currentFolder->id, $newName);
-
-                $tesseract = new TesseractOCR(Storage::path($url));
-
-                $fileContent = $tesseract->run();
-
-
-                File::create([
-                    'name' => $newName,
-                    'user_id' => Auth::id(),
-                    'folder_id' => $this->currentFolder->id,
-                    'contents' => $fileContent,
-                    'path' => "/storage/$url",
-                ]);
-            }
-        }
-
-        // Reset file inputs if needed
-        $this->reset(['file', 'addFile']);
-
-        // Redirect and success message
-        $this->redirect(url()->previous(), true);
-        $this->success('Files added successfully', 'yeah');
-
-    }*/
+    public $fileIndex = 0;
+    public $fileCount = 0;
+    public $progress = 0;
 
     public function saveFile()
     {
         $this->validate();
 
-        // Retrieve existing file names for the current folder
+        $this->fileIndex = 0;
+        $this->fileCount = count($this->file);
+
+        $this->processNextFile();
+    }
+
+
+    #[On('processNextFile')]
+    public function processNextFile()
+    {
+        if ($this->fileIndex >= $this->fileCount) {
+            $this->reset(['file', 'addFile']);
+            $this->redirect(url()->previous(), true);
+            $this->success('Files added successfully', 'yeah');
+            return;
+        }
+
+        $item = $this->file[$this->fileIndex];
+        $originalName = $item->getClientOriginalName();
+        $name = pathinfo($originalName, PATHINFO_FILENAME);
+        $extension = $item->getClientOriginalExtension();
+        $newName = $originalName;
+
+        $this->uploadStatusMessage = "Processing File:<br> $originalName";
+
+        // Check if file name exists and rename if necessary
         $existingFileNames = File::where('folder_id', $this->currentFolder->id)
             ->pluck('name')
             ->toArray();
 
-        // Process each file
-        if ($this->file) {
-            foreach ($this->file as $item) {
-                $originalName = $item->getClientOriginalName();
-                $name = pathinfo($originalName, PATHINFO_FILENAME);
-                $extension = $item->getClientOriginalExtension();
-                $newName = $originalName;
-
-//                $this->dispatch('statusMessage',"Processing file: $originalName");
-
-                $this->uploadStatusMessage = "Processing File: $originalName";
-
-                sleep(2);
-
-
-                // Check if the file name exists and rename if necessary
-                $counter = 1;
-                while (in_array($newName, $existingFileNames)) {
-                    $newName = $name . " ($counter)." . $extension;
-                    $counter++;
-                }
-
-                $url = $item->storeAs($this->currentFolder->id, $newName);
-
-                // Process the file with Tesseract OCR
-                $fileContent = '';
-
-                if ($extension === 'pdf') {
-                    // Convert PDF to images
-                    $pdf = new \Spatie\PdfToImage\Pdf(Storage::path($url));
-                    $outputDirectory = 'public/temp_images/' . pathinfo($newName, PATHINFO_FILENAME);
-
-                    // Ensure the output directory exists
-                    if (!Storage::exists($outputDirectory)) {
-                        Storage::makeDirectory($outputDirectory);
-                    }
-
-                    // Loop through each page of the PDF and process with Tesseract OCR
-                    for ($pageNumber = 1; $pageNumber <= $pdf->pageCount(); $pageNumber++) {
-                        $outputPath = storage_path('app/' . $outputDirectory . "/page-{$pageNumber}.jpg");
-                        $pdf->selectPage($pageNumber)->save($outputPath);
-
-                        $tesseract = new TesseractOCR($outputPath);
-                        $fileContent .= $tesseract->run() . "\n";
-                    }
-
-                    // Clean up temporary images
-                    Storage::deleteDirectory($outputDirectory);
-                } else {
-                    // Process image directly with Tesseract OCR
-                    $tesseract = new TesseractOCR(Storage::path($url));
-                    $fileContent = $tesseract->run();
-                }
-
-                File::create([
-                    'name' => $newName,
-                    'user_id' => Auth::id(),
-                    'folder_id' => $this->currentFolder->id,
-                    'contents' => $fileContent,
-                    'path' => "/storage/$url",
-                ]);
-            }
+        $counter = 1;
+        while (in_array($newName, $existingFileNames)) {
+            $newName = $name . " ($counter)." . $extension;
+            $counter++;
         }
 
-        // Reset file inputs if needed
-        $this->reset(['file', 'addFile']);
+        $url = $item->storeAs($this->currentFolder->id, $newName);
 
-        // Redirect and success message
-        $this->redirect(url()->previous(), true);
-        $this->success('Files added successfully', 'yeah');
+        $fileContent = '';
+
+        if ($extension === 'pdf') {
+
+            $pdfToText = new \Spatie\PdfToText\Pdf('C:\laragon\bin\git\mingw64\bin\pdftotext.exe');
+            $text = $pdfToText->setPdf(Storage::path($url))->text();
+            $fileContent = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+
+//            dd($fileContent);
+
+            if (empty($fileContent)) {
+                $pdf = new \Spatie\PdfToImage\Pdf(Storage::path($url));
+                $outputDirectory = dirname(Storage::path($url));
+                $baseFileName = pathinfo($newName, PATHINFO_FILENAME);
+
+                $pageCount = $pdf->pageCount();
+                for ($pageNumber = 1; $pageNumber <= $pageCount; $pageNumber++) {
+                    $outputPath = $outputDirectory . "/{$baseFileName}_page-{$pageNumber}.jpg";
+                    $pdf->selectPage($pageNumber)->save($outputPath);
+
+                    $tesseract = new TesseractOCR($outputPath);
+                    $fileContent .= $tesseract->run() . "\n";
+
+                    unlink($outputPath);
+
+                    // Update progress
+                    $this->progress = ($this->fileIndex * $pageCount + $pageNumber) / ($this->fileCount * $pageCount) * 100;
+                }
+            }
+
+
+        } else {
+            try {
+                $tesseract = new TesseractOCR(Storage::path($url));
+                $fileContent = $tesseract->run();
+            } catch (UnsuccessfulCommandException $e) {
+//                dd('OCR failed:', $e->getMessage());
+
+            }
+
+
+            // Update progress
+            $this->progress = (($this->fileIndex + 1) / $this->fileCount) * 100;
+        }
+
+        File::create([
+            'name' => $newName,
+            'user_id' => Auth::id(),
+            'folder_id' => $this->currentFolder->id,
+            'contents' => $fileContent,
+            'path' => "/storage/$url",
+        ]);
+
+        $this->fileIndex++;
+//        $this->processNextFile();
+        $this->dispatch('processNextFile');
     }
-
 
     public function cancelModal()
     {
@@ -419,23 +451,25 @@ new class extends Component {
 
     <x-card :title="$currentFolder->name">
 
-        <div class="join">
-            <x-button wire:click="selectTab('files')"
-                      class="btn btn-outline btn-sm {{$selectedTab == 'files' ? 'btn-active':''}}  join-item rounded-l-full"
-                      icon="o-document" spinner responsive>
-                Files
-            </x-button>
-            <x-button wire:click="selectTab('all')"
-                      class="btn btn-outline btn-sm {{$selectedTab == 'all' ? 'btn-active':''}} join-item"
-                      icon="o-document" spinner responsive>
-                All
-            </x-button>
-            <x-button wire:click="selectTab('folders')"
-                      class="btn btn-outline btn-sm {{$selectedTab == 'folders' ? 'btn-active':''}}  join-item rounded-r-full"
-                      icon="o-folder" spinner responsive>
-                Folders
-            </x-button>
-        </div>
+        @if(count($folderFiles) > 0)
+            <div class="join">
+                <x-button wire:click="selectTab('files')"
+                          class="btn btn-outline btn-sm {{$selectedTab == 'files' ? 'btn-active':''}}  join-item rounded-l-full"
+                          icon="o-document" spinner responsive>
+                    Files
+                </x-button>
+                <x-button wire:click="selectTab('all')"
+                          class="btn btn-outline btn-sm {{$selectedTab == 'all' ? 'btn-active':''}} join-item"
+                          icon="o-document" spinner responsive>
+                    All
+                </x-button>
+                <x-button wire:click="selectTab('folders')"
+                          class="btn btn-outline btn-sm {{$selectedTab == 'folders' ? 'btn-active':''}}  join-item rounded-r-full"
+                          icon="o-folder" spinner responsive>
+                    Folders
+                </x-button>
+            </div>
+        @endif
 
 
         <div class="divider"></div>
@@ -574,36 +608,61 @@ new class extends Component {
 
 
     {{--    ADD File MODAL--}}
-    <x-modal wire:model="addFile" title="Upload File" box-class="w-4/5 m-auto">
+    <x-modal wire:model="addFile" title="Upload File" box-class="w-4/5 m-auto" persistent>
         <x-form wire:submit="saveFile" no-separator>
-{{--            <div>{{$uploadStatusMessage}}</div>--}}
-            <div x-text="$wire.uploadStatusMessage"></div>
             <x-hr/>
-            <x-filepond::upload wire:model="file"
-                                type="file"
-                                allow-reorder
-                                item-insert-interval="0"
-                                multiple
-                                drop-on-page
-                                required
-                                drop-on-element="false"
-            />
+
+
+            {{--            <x-filepond::upload wire:model="file"--}}
+            {{--                                type="file"--}}
+            {{--                                allow-reorder--}}
+            {{--                                item-insert-interval="0"--}}
+            {{--                                multiple--}}
+            {{--                                drop-on-page--}}
+            {{--                                required--}}
+            {{--                                drop-on-element="false"--}}
+            {{--            />--}}
+            <template x-if="$wire.uploadStatusMessage == ''">
+                <x-file wire:model="file" label="Documents" multiple/>
+            </template>
+            <div wire:loading wire:target="file">Uploading...
+                <x-loading/>
+            </div>
 
             @error("file.*")
-            <x-alert :title="$message" icon="o-exclamation-triangle"/>@enderror
+            <x-alert :title="$message" icon="o-exclamation-triangle"/>
+            @enderror
 
-            <div class="flex justify-end">
-                <x-button label="Cancel" @click="$wire.addFile = false;$wire.cancelModal()"/>
-                <button class="btn btn-primary">
-                    <span wire:loading.remove>Upload</span>
-                    <span wire:loading>Uploading</span>
-                    <span><x-loading wire:loading class="loading-dots"/></span>
-                </button>
-            </div>
-            {{--            <x-slot:actions>--}}
+            <template x-if="$wire.uploadStatusMessage !== ''">
+                <div class="mt-2">
+                    <div class="flex mb-2 items-center justify-between align-middle">
+                        <div x-html="$wire.uploadStatusMessage"
+                             class="text-xs truncate w-1/2 text-ellipsis overflow-hidden ..."></div>
+                        <div class="text-xs font-semibold mt-1 text-teal-600">
+                            <span x-text="Math.round($wire.progress) + '%'"></span>
+                        </div>
+                    </div>
+
+                    <x-progress value="{{$progress}}" max="100" class="progress-primary h-0.5"/>
+                </div>
+            </template>
+
+            {{--            <div class="flex justify-end">--}}
             {{--                <x-button label="Cancel" @click="$wire.addFile = false;$wire.cancelModal()"/>--}}
-            {{--                <x-button wire:loading.remove type="submit" label="Upload" class="btn-primary" spinner="file" />--}}
-            {{--            </x-slot:actions>--}}
+            {{--                <button class="btn btn-primary">--}}
+            {{--                    <span wire:loading.remove>Upload</span>--}}
+            {{--                    <span wire:loading>Uploading</span>--}}
+            {{--                    <span><x-loading wire:loading class="loading-dots"/></span>--}}
+            {{--                </button>--}}
+            {{--            </div>--}}
+            <x-slot:actions>
+
+                <x-button label="Cancel" @click="$wire.addFile = false;"/>
+
+                <x-button wire:loading.remove wire:target="processNextFile" type="submit" label="Upload"
+                          class="btn-primary" spinner="processNextFile"/>
+
+            </x-slot:actions>
         </x-form>
     </x-modal>
 
@@ -614,29 +673,11 @@ new class extends Component {
 
 @push('scripts')
 
-        <script>
-            document.addEventListener('livewire:init',function (){
-                Livewire.on('statusMessage',(e) =>{
-                   console.log(e)
-                });
-                // Livewire.hook('commit', ({ component, commit, respond, succeed, fail }) => {
-                //     // Runs immediately before a commit's payload is sent to the server...
-                //     Livewire.dispatch('uploading')
-                //     /*dispatch livewire event*/
-                //
-                //     respond(() => {
-                //         // Runs after a response is received but before it's processed...
-                //     })
-                //
-                //     succeed(({ snapshot, effect }) => {
-                //         // Runs after a successful response is received and processed
-                //         // with a new snapshot and list of effects...
-                //     })
-                //
-                //     fail(() => {
-                //         // Runs if some part of the request failed...
-                //     })
-                // })
-            })
-        </script>
+    {{--        <script>--}}
+    {{--            document.addEventListener('livewire:init',function (){--}}
+    {{--                Livewire.on('statusUpdated',(e) =>{--}}
+    {{--                   console.log(e)--}}
+    {{--                });--}}
+    {{--            })--}}
+    {{--        </script>--}}
 @endpush

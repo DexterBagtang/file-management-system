@@ -145,5 +145,4 @@ new class extends Component {
         </x-slot:actions>
     </x-drawer>
 
-
 </div>
