@@ -308,11 +308,12 @@ new class extends Component {
     public $fileIndex = 0;
     public $fileCount = 0;
     public $progress = 0;
+    public $processingFiles = false;
 
     public function saveFile()
     {
         $this->validate();
-
+        $this->processingFiles = true;
         $this->fileIndex = 0;
         $this->fileCount = count($this->file);
 
@@ -349,21 +350,21 @@ new class extends Component {
             $counter++;
         }
 
-        $url = $item->storeAs($this->currentFolder->id, $newName);
+        // Store the file in the public disk
+        $url = $item->storeAs($this->currentFolder->id, $newName, 'public');
+
+        $filepath = Storage::disk('public')->path($url);
 
         $fileContent = '';
 
         if ($extension === 'pdf') {
-
             $pdfToText = new \Spatie\PdfToText\Pdf('C:\laragon\bin\git\mingw64\bin\pdftotext.exe');
-            $text = $pdfToText->setPdf(Storage::path($url))->text();
+            $text = $pdfToText->setPdf($filepath)->text();
             $fileContent = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
 
-//            dd($fileContent);
-
             if (empty($fileContent)) {
-                $pdf = new \Spatie\PdfToImage\Pdf(Storage::path($url));
-                $outputDirectory = dirname(Storage::path($url));
+                $pdf = new \Spatie\PdfToImage\Pdf($filepath);
+                $outputDirectory = dirname($filepath);
                 $baseFileName = pathinfo($newName, PATHINFO_FILENAME);
 
                 $pageCount = $pdf->pageCount();
@@ -379,18 +380,16 @@ new class extends Component {
                     // Update progress
                     $this->progress = ($this->fileIndex * $pageCount + $pageNumber) / ($this->fileCount * $pageCount) * 100;
                 }
+            } else {
+                $this->progress = (($this->fileIndex + 1) / $this->fileCount) * 100;
             }
-
-
         } else {
             try {
-                $tesseract = new TesseractOCR(Storage::path($url));
+                $tesseract = new TesseractOCR($filepath);
                 $fileContent = $tesseract->run();
             } catch (UnsuccessfulCommandException $e) {
-//                dd('OCR failed:', $e->getMessage());
-
+                // Handle OCR failure
             }
-
 
             // Update progress
             $this->progress = (($this->fileIndex + 1) / $this->fileCount) * 100;
@@ -401,12 +400,11 @@ new class extends Component {
             'user_id' => Auth::id(),
             'folder_id' => $this->currentFolder->id,
             'contents' => $fileContent,
-            'path' => "/storage/$url",
+            'path' => $url,
         ]);
 
         $this->fileIndex++;
-//        $this->processNextFile();
-        $this->dispatch('processNextFile');
+        $this->dispatch('processNextFile')->self();
     }
 
     public function cancelModal()
@@ -479,6 +477,7 @@ new class extends Component {
                 selected: @entangle('selected'),
                 isSelected:false,
                 addAllItems() {
+                    this.selected = [];
                     let items = JSON.parse(@js($formattedJson));
                     if (Array.isArray(items)) {
                         items.forEach(item => this.selected.push(item));
@@ -551,7 +550,8 @@ new class extends Component {
                         📂 {{ $folderFile['name'] }}
                     </a>
                 @else
-                    <a href="/files/{{ $folderFile['id'] }}">
+{{--                    <a href="/files/{{ $folderFile['id'] }}">--}}
+                    <a href="{{Storage::url($folderFile['path'])}}">
                         📄 {{ $folderFile['name'] }}
                     </a>
                 @endif
@@ -622,7 +622,7 @@ new class extends Component {
             {{--                                required--}}
             {{--                                drop-on-element="false"--}}
             {{--            />--}}
-            <template x-if="$wire.uploadStatusMessage == ''">
+            <template x-if="!$wire.processingFiles">
                 <x-file wire:model="file" label="Documents" multiple/>
             </template>
             <div wire:loading wire:target="file">Uploading...
@@ -633,11 +633,11 @@ new class extends Component {
             <x-alert :title="$message" icon="o-exclamation-triangle"/>
             @enderror
 
-            <template x-if="$wire.uploadStatusMessage !== ''">
+            <template x-if="$wire.processingFiles">
                 <div class="mt-2">
                     <div class="flex mb-2 items-center justify-between align-middle">
                         <div x-html="$wire.uploadStatusMessage"
-                             class="text-xs truncate w-1/2 text-ellipsis overflow-hidden ..."></div>
+                             class="text-xs truncate w-1/2 max-w-64 text-ellipsis overflow-hidden ..."></div>
                         <div class="text-xs font-semibold mt-1 text-teal-600">
                             <span x-text="Math.round($wire.progress) + '%'"></span>
                         </div>
@@ -646,7 +646,6 @@ new class extends Component {
                     <x-progress value="{{$progress}}" max="100" class="progress-primary h-0.5"/>
                 </div>
             </template>
-
             {{--            <div class="flex justify-end">--}}
             {{--                <x-button label="Cancel" @click="$wire.addFile = false;$wire.cancelModal()"/>--}}
             {{--                <button class="btn btn-primary">--}}
@@ -659,7 +658,10 @@ new class extends Component {
 
                 <x-button label="Cancel" @click="$wire.addFile = false;"/>
 
-                <x-button wire:loading.remove wire:target="processNextFile" type="submit" label="Upload"
+                <x-button wire:loading.remove wire:target="processNextFile"
+                          @click="$wire.processingFiles = true;
+                          $wire.uploadStatusMessage = 'Preparing to process files ...'"
+                          type="submit" label="Upload"
                           class="btn-primary" spinner="processNextFile"/>
 
             </x-slot:actions>
