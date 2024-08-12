@@ -1,11 +1,14 @@
 <?php
 
+use App\Livewire\FileManager;
+use App\Livewire\FolderManager;
 use App\Livewire\Forms\FileForm;
 use App\Livewire\Forms\FolderForm;
 use App\Models\File;
 use App\Models\Folder;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
-use Illuminate\Validation\Rule;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
@@ -15,38 +18,48 @@ use Livewire\Attributes\Validate;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\On;
 use Illuminate\Support\Facades\Storage;
+use App\Jobs\ProcessFile;
+use Illuminate\Support\Str;
+
+
 use Spatie\PdfToImage\Pdf;
 use thiagoalessio\TesseractOCR\TesseractOCR;
 use thiagoalessio\TesseractOCR\UnsuccessfulCommandException;
+use Livewire\Attributes\Rule;
 
 
 new class extends Component {
-    use Toast, WithPagination, WithFilePond, WithFileUploads;
+    use WithFilePond;
+    use WithFileUploads;
+    use Toast, WithPagination;
+    use FolderManager, FileManager;
 
-    public FolderForm $folderForm;
-    public FileForm $fileForm;
     public Folder $currentFolder;
     public string $search = '';
-    public bool $addModal = false;
+    public bool $addFolderModal = false;
+    public bool $editFolderModal = false;
     public array $selected = [];
-    public array $sortBy = ['column' => 'id', 'direction' => 'desc'];
-    public array $breadcrumbs = [];
+    public array $sortBy = ['column' => 'created_at', 'direction' => 'desc'];
     public string $selectedTab = 'all';
     public bool $submitFile = false;
     public string $uploadStatusMessage = '';
-
-
+    public string $uploadOption = '';
     public string $name;
+    public bool $isRenaming = false;
+    public int $folderId;
+    public bool $moveItemModal = false;
 
-    #[Validate(['file.*' => 'max:10024'])]
+//    #[Rule('required')]
     public array $file = [];
-
     public bool $addFile = false;
+    public bool $renameFile = false;
+
 
 
     public function mount($id): void
     {
         $this->currentFolder = Folder::findOrFail($id);
+        $this->getFolders();
         $this->buildBreadcrumbs();
     }
 
@@ -68,18 +81,41 @@ new class extends Component {
 
         if ($this->selectedTab == 'all' || $this->selectedTab == 'files') {
             // Fetch files
-            $files = File::query()
-                ->select('files.*', 'users.name as owner', DB::raw("'file' as type"))
-                ->where('folder_id', $this->currentFolder->id ?? null)
-                ->join('users', 'files.user_id', '=', 'users.id')
-                ->when($this->search, fn($q) => $q->where('files.name', 'like', "%$this->search%")
-                    ->orWhere('files.contents', 'like', "%$this->search%"))
-                ->get()
-                ->toArray();
+//            $files = File::query()
+//                ->select('files.*', 'users.name as owner', DB::raw("'file' as type"))
+//                ->where('folder_id', $this->currentFolder->id ?? null)
+//                ->join('users', 'files.user_id', '=', 'users.id')
+//                ->when($this->search, fn($q) => $q->where('files.name', 'like', "%$this->search%")
+//                    ->orWhere('files.contents', 'like', "%$this->search%"))
+//                ->get()
+//                ->toArray();
+
+            // Perform a Scout search first
+            $filesQuery = File::search($this->search)
+                ->query(function (Builder $query) {
+                    $query->select('files.*', 'users.name as owner', DB::raw("'file' as type"))
+                    ->join('users', 'files.user_id', '=', 'users.id')
+                    ->where('folder_id', $this->currentFolder->id ?? null)
+                    ;
+            })->get();
+            $files = $filesQuery->toArray();
+
+//            //MYsql built in full text search
+//            $files = File::query()
+//                ->select('files.*', 'users.name as owner', DB::raw("'file' as type"))
+//                ->where('folder_id', $this->currentFolder->id ?? null)
+//                ->join('users', 'files.user_id', '=', 'users.id')
+//                ->when($this->search, fn($q) => $q->where('files.name', 'like', "%$this->search%")
+////                    ->orWhere('files.contents', 'like', "%$this->search%")
+//                    ->orWhereRaw("MATCH(contents) AGAINST(? IN BOOLEAN MODE)", [$this->search])
+//                )
+//                ->get()
+//                ->toArray();
         }
 
         // Merge folders and files based on the selected tab
         $merged = array_merge($folders, $files);
+//        dd($merged);
 
         // Convert to collection for sorting and pagination
         $collection = collect($merged);
@@ -121,30 +157,6 @@ new class extends Component {
     }
 
 
-    public function save()
-    {
-        $this->validate([
-            'name' => ['required',
-                Rule::unique('folders')->where(function ($query) {
-                    return $query->where('parent_id', $this->currentFolder->id ?? null);
-                })
-            ]
-        ], [
-            'name.unique' => 'A folder with this name already exists in this location. Please choose a different name.',
-        ]);
-        Folder::create([
-            'name' => $this->name,
-            'parent_id' => $this->currentFolder->id ?? null,
-            'user_id' => auth()->id(),
-        ]);
-
-        $this->reset(['name']);
-
-        $this->addModal = false;
-
-        $this->success('Folder created successfully.');
-    }
-
     public function delete($id, $type)
     {
         if ($type == 'folder') {
@@ -161,31 +173,7 @@ new class extends Component {
 
     public function bulkDelete()
     {
-        foreach ($this->selected as $item) {
-            list($type, $id) = explode('-', $item);
-
-            if ($type === 'folder') {
-                Folder::destroy($id);
-            } elseif ($type === 'file') {
-                File::destroy($id);
-            }
-
-        }
-
-        $this->reset('selected');
-
-        $this->warning("Selected items deleted", 'Good bye!', position: 'toast-bottom');
-    }
-
-    public function buildBreadcrumbs()
-    {
-        $this->breadcrumbs = [];
-        $folder = Folder::find($this->currentFolder->id ?? null);
-
-        while ($folder) {
-            array_unshift($this->breadcrumbs, $folder);
-            $folder = $folder->parent;
-        }
+        $this->bulkDeleteItems($this->selected,false);
     }
 
 
@@ -198,7 +186,15 @@ new class extends Component {
             $this->submitFile = true;
         }
 
+        if ($property === 'addFolderModal' || $property === 'editFolderModal' || $property === 'renameFile' || $property === 'addFile') {
+            if (!$this->$property) {
+                $this->resetValidation();
+                $this->reset('name');
+            }
+        }
+
     }
+
 
     public function formattedArray()
     {
@@ -208,209 +204,8 @@ new class extends Component {
         return json_encode($formattedArray);
     }
 
-    public function selectAll()
-    {
-        $this->reset(['search', 'selected']);
-//        $all = $this->mergedData()->map(function ($item) {
-//            return ['id' => $item['id'], 'type' => $item['type']];
-//        })->toArray();
-        foreach ($this->mergedData() as $fileData) {
-            $format = $fileData['type'] . '-' . $fileData['id'];
-            $this->selected[] = $format;
-        }
-
-//        $this->selected = $all;
-//        dd($this->selected);
-        $this->success('All folders selected');
-    }
-
-    public function unselectAll()
-    {
-        $this->reset('selected');
-        $this->selected = [];
-        $this->success('All folders unselected.');
-    }
-
-//    public function saveFile()
-//    {
-//        $this->validate();
-//
-//        // Retrieve existing file names for the current folder
-//        $existingFileNames = File::where('folder_id', $this->currentFolder->id)
-//            ->pluck('name')
-//            ->toArray();
-//
-//        // Process each file
-//        if ($this->file) {
-//            foreach ($this->file as $item) {
-//                $originalName = $item->getClientOriginalName();
-//                $name = pathinfo($originalName, PATHINFO_FILENAME);
-//                $extension = $item->getClientOriginalExtension();
-//                $newName = $originalName;
-//
-//                $this->uploadStatusMessage = "Processing File: $originalName";
-//
-//                sleep(3);
-//
-//                // Check if the file name exists and rename if necessary
-//                $counter = 1;
-//                while (in_array($newName, $existingFileNames)) {
-//                    $newName = $name . " ($counter)." . $extension;
-//                    $counter++;
-//                }
-//
-//                $url = $item->storeAs($this->currentFolder->id, $newName);
-//
-//                // Process the file with Tesseract OCR
-//                $fileContent = '';
-//
-//                if ($extension === 'pdf') {
-//                    // Convert PDF to images
-//                    $pdf = new \Spatie\PdfToImage\Pdf(Storage::path($url));
-//                    $outputDirectory = dirname(Storage::path($url));
-//                    $baseFileName = pathinfo($newName, PATHINFO_FILENAME);
-//
-//                    // Loop through each page of the PDF and process with Tesseract OCR
-//                    for ($pageNumber = 1; $pageNumber <= $pdf->pageCount(); $pageNumber++) {
-//                        $outputPath = $outputDirectory . "/{$baseFileName}_page-{$pageNumber}.jpg";
-//                        $pdf->selectPage($pageNumber)->save($outputPath);
-//
-//                        $tesseract = new TesseractOCR($outputPath);
-//                        $fileContent .= $tesseract->run() . "\n";
-//
-//                        // Delete the image after processing
-//                        unlink($outputPath);
-//                    }
-//                } else {
-//                    // Process image directly with Tesseract OCR
-//                    $tesseract = new TesseractOCR(Storage::path($url));
-//                    $fileContent = $tesseract->run();
-//                }
-//
-//                File::create([
-//                    'name' => $newName,
-//                    'user_id' => Auth::id(),
-//                    'folder_id' => $this->currentFolder->id,
-//                    'contents' => $fileContent,
-//                    'path' => "/storage/$url",
-//                ]);
-//            }
-//        }
-//
-//        // Reset file inputs if needed
-//        $this->reset(['file', 'addFile']);
-//
-//        // Redirect and success message
-//        $this->redirect(url()->previous(), true);
-//        $this->success('Files added successfully', 'yeah');
-//    }
-
-    public $fileIndex = 0;
-    public $fileCount = 0;
-    public $progress = 0;
-    public $processingFiles = false;
-
-    public function saveFile()
-    {
-        $this->validate();
-        $this->processingFiles = true;
-        $this->fileIndex = 0;
-        $this->fileCount = count($this->file);
-
-        $this->processNextFile();
-    }
 
 
-    #[On('processNextFile')]
-    public function processNextFile()
-    {
-        if ($this->fileIndex >= $this->fileCount) {
-            $this->reset(['file', 'addFile']);
-            $this->redirect(url()->previous(), true);
-            $this->success('Files added successfully', 'yeah');
-            return;
-        }
-
-        $item = $this->file[$this->fileIndex];
-        $originalName = $item->getClientOriginalName();
-        $name = pathinfo($originalName, PATHINFO_FILENAME);
-        $extension = $item->getClientOriginalExtension();
-        $newName = $originalName;
-
-        $this->uploadStatusMessage = "Processing File:<br> $originalName";
-
-        // Check if file name exists and rename if necessary
-        $existingFileNames = File::where('folder_id', $this->currentFolder->id)
-            ->pluck('name')
-            ->toArray();
-
-        $counter = 1;
-        while (in_array($newName, $existingFileNames)) {
-            $newName = $name . " ($counter)." . $extension;
-            $counter++;
-        }
-
-        // Store the file in the public disk
-        $url = $item->storeAs($this->currentFolder->id, $newName, 'public');
-
-        $filepath = Storage::disk('public')->path($url);
-
-        $fileContent = '';
-
-        if ($extension === 'pdf') {
-            $pdfToText = new \Spatie\PdfToText\Pdf('C:\laragon\bin\git\mingw64\bin\pdftotext.exe');
-            $text = $pdfToText->setPdf($filepath)->text();
-            $fileContent = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
-
-            if (empty($fileContent)) {
-                $pdf = new \Spatie\PdfToImage\Pdf($filepath);
-                $outputDirectory = dirname($filepath);
-                $baseFileName = pathinfo($newName, PATHINFO_FILENAME);
-
-                $pageCount = $pdf->pageCount();
-                for ($pageNumber = 1; $pageNumber <= $pageCount; $pageNumber++) {
-                    $outputPath = $outputDirectory . "/{$baseFileName}_page-{$pageNumber}.jpg";
-                    $pdf->selectPage($pageNumber)->save($outputPath);
-
-                    $tesseract = new TesseractOCR($outputPath);
-                    $fileContent .= $tesseract->run() . "\n";
-
-                    unlink($outputPath);
-
-                    // Update progress
-                    $this->progress = ($this->fileIndex * $pageCount + $pageNumber) / ($this->fileCount * $pageCount) * 100;
-                }
-            } else {
-                $this->progress = (($this->fileIndex + 1) / $this->fileCount) * 100;
-            }
-        } else {
-            try {
-                $tesseract = new TesseractOCR($filepath);
-                $fileContent = $tesseract->run();
-            } catch (UnsuccessfulCommandException $e) {
-                // Handle OCR failure
-            }
-
-            // Update progress
-            $this->progress = (($this->fileIndex + 1) / $this->fileCount) * 100;
-        }
-
-        File::create([
-            'name' => $newName,
-            'user_id' => Auth::id(),
-            'folder_id' => $this->currentFolder->id,
-            'contents' => $fileContent,
-            'path' => $url,
-        ]);
-
-        $this->fileIndex++;
-        $this->dispatch('processNextFile')->self();
-    }
-
-    public function cancelModal()
-    {
-        $this->reset('file');
-    }
 
 
 };
@@ -418,9 +213,9 @@ new class extends Component {
 
 <div>
     <x-header title="" separator progress-indicator>
-        <x-slot:middle>
-            <x-input placeholder="Search..." wire:model.live.debounce="search" clearable icon="o-magnifying-glass"/>
-        </x-slot:middle>
+{{--        <x-slot:middle>--}}
+{{--            <x-input placeholder="Search..." wire:model.live.debounce="search" clearable icon="o-magnifying-glass"/>--}}
+{{--        </x-slot:middle>--}}
         <x-slot:actions>
             {{--            <x-button label="New" @click="$wire.drawer = true;$wire.name=''" class="btn-primary" icon="s-plus"/>--}}
             {{-- Custom trigger  --}}
@@ -429,9 +224,23 @@ new class extends Component {
                     <x-button label="New" icon="s-plus" class="btn-primary"/>
                 </x-slot:trigger>
 
-                <x-menu-item title="Folder" @click="$wire.addModal = true;$wire.name=''" icon="o-folder-plus"/>
+                <x-menu-item title="Folder" @click="$wire.addFolderModal = true;$wire.name=''" icon="o-folder-plus"/>
                 <x-menu-separator/>
-                <x-menu-item title="Upload File" @click="$wire.addFile = true;$wire.name=''"
+                <x-popover position="left">
+                    <x-slot:trigger>
+                        <x-menu-item title="Upload File with Filepond"
+                                     @click="$wire.addFile = true;$wire.uploadOption='filepond'"
+                                     icon="o-document-arrow-up"/>
+                    </x-slot:trigger>
+                    <x-slot:content class="w-36 text-xs text-wrap rounded-lg">
+                        Advance File Uploader provides enhanced
+                        features such as drag-and-drop, image previews,
+                        and customizable file handling.
+                    </x-slot:content>
+                </x-popover>
+
+                <x-menu-item title="Standard File Upload"
+                             @click="$wire.addFile = true;$wire.uploadOption='standard'"
                              icon="o-document-arrow-up"/>
             </x-dropdown>
         </x-slot:actions>
@@ -449,85 +258,11 @@ new class extends Component {
 
     <x-card :title="$currentFolder->name">
 
-        @if(count($folderFiles) > 0)
-            <div class="join">
-                <x-button wire:click="selectTab('files')"
-                          class="btn btn-outline btn-sm {{$selectedTab == 'files' ? 'btn-active':''}}  join-item rounded-l-full"
-                          icon="o-document" spinner responsive>
-                    Files
-                </x-button>
-                <x-button wire:click="selectTab('all')"
-                          class="btn btn-outline btn-sm {{$selectedTab == 'all' ? 'btn-active':''}} join-item"
-                          icon="o-document" spinner responsive>
-                    All
-                </x-button>
-                <x-button wire:click="selectTab('folders')"
-                          class="btn btn-outline btn-sm {{$selectedTab == 'folders' ? 'btn-active':''}}  join-item rounded-r-full"
-                          icon="o-folder" spinner responsive>
-                    Folders
-                </x-button>
-            </div>
-        @endif
-
+        <x-table-tabs :selectedTab="$selectedTab"/>
 
         <div class="divider"></div>
 
-
-        <div x-data="{
-                selected: @entangle('selected'),
-                isSelected:false,
-                addAllItems() {
-                    this.selected = [];
-                    let items = JSON.parse(@js($formattedJson));
-                    if (Array.isArray(items)) {
-                        items.forEach(item => this.selected.push(item));
-                    } else {
-                        console.error('Parsed items is not an array:', items);
-                        // Convert object to array
-                        items = Object.values(items);
-                        items.forEach(item => this.selected.push(item));
-                    }
-                    this.isSelected = true;
-                },
-                unselectAll() {
-                    this.selected = [];
-                    this.isSelected = false;
-                }
-            }">
-            <template x-if="$wire.selected.length > 0">
-                <div class="flex justify-between">
-                    <x-button class="btn-xs" spinner>
-                        <span x-text="$wire.selected.length"></span>
-                        items selected
-                    </x-button>
-
-                    <div class="flex justify-around">
-                        <template x-if="!isSelected">
-                            <x-button
-                                @click="addAllItems"
-
-                                {{--                        wire:click="selectAll" --}}
-                                spinner
-                                class="btn-primary btn-outline btn-xs">
-                                Select All
-                            </x-button>
-                        </template>
-
-                        <div class="divider m-0 divider-horizontal"></div>
-                        <x-button
-                            @click="unselectAll"
-                            {{--                        wire:click="unselectAll" --}}
-                            spinner
-                            class="btn-error btn-outline btn-xs">
-                            Unselect All
-                        </x-button>
-                    </div>
-
-                </div>
-
-            </template>
-        </div>
-
+        <x-selection-actions :formattedJson="$formattedJson"/>
 
         @if(count($folderFiles) != 0)
             <x-table :headers="$headers" :rows="$folderFiles" class="table-xs" :sort-by="$sortBy">
@@ -547,27 +282,43 @@ new class extends Component {
                 @scope('cell_name', $folderFile)
                 @if($folderFile['type'] === 'folder')
                     <a wire:navigate href="/folders/{{ $folderFile['id'] }}/show">
-                        📂 {{ $folderFile['name'] }}
+                        📂 {{ Str::limit($folderFile['name'],60) }}
                     </a>
                 @else
-{{--                    <a href="/files/{{ $folderFile['id'] }}">--}}
-                    <a href="{{Storage::url($folderFile['path'])}}">
-                        📄 {{ $folderFile['name'] }}
+{{--                    <a href="{{Storage::url($folderFile['path'])}}" target="_blank">--}}
+{{--                        📄 {{ Str::limit($folderFile['name'],60) }}--}}
+{{--                    </a>--}}
+
+                    <a wire:navigate href="/file/{{$folderFile['id']}}/view" >
+                        📄 {{ Str::limit($folderFile['name'],60) }}
                     </a>
                 @endif
+                @endscope
+
+                @scope('cell_created_at',$folderFile)
+                <div>
+                    {{Carbon::parse($folderFile['created_at'])->diffForHumans()}}
+                </div>
                 @endscope
 
 
                 @scope('actions', $folderFile)
                 <div class="flex">
-                    <x-button icon="o-pencil"
-                              @click="$wire.editModal = true; $wire.name = '{{$folderFile['name']}}';
+                    @if($folderFile['type'] == 'folder')
+                        <x-button icon="o-pencil"
+                                  @click="$wire.editFolderModal = true;
+                              $wire.name = '{{$folderFile['name']}}';
+                              $wire.isRenaming = true;
                               $wire.folderId={{$folderFile['id']}}" spinner
-                              class="btn-ghost btn-sm text-blue-500"/>
+                                  class="btn-ghost btn-sm text-blue-500"/>
+                    @else
+                        <x-button icon="o-pencil"
+                                  @click="$wire.renameFile = true;
+                              $wire.name = '{{pathinfo($folderFile['name'],PATHINFO_FILENAME)}}';
+                              $wire.folderId={{$folderFile['id']}}" spinner
+                                  class="btn-ghost btn-sm text-blue-500"/>
+                    @endif
 
-                    {{--                    <x-button icon="o-trash" wire:click="delete({{$folderFile['id']}},{{$folderFile['type']}})" wire:confirm="Are you sure?"--}}
-                    {{--                              spinner--}}
-                    {{--                              class="btn-ghost btn-sm text-red-500"/>--}}
 
                     <x-button icon="o-trash" wire:click="delete({{$folderFile['id']}},'{{$folderFile['type']}}')"
                               wire:confirm="Are you sure?"
@@ -586,8 +337,16 @@ new class extends Component {
 
         <x-slot:menu>
             <template x-if="$wire.selected.length > 0">
-                <x-button wire:click="bulkDelete" wire:confirm="Are you sure to deleted the selected items?" spinner
-                          label="Delete Selected" icon="o-trash" responsive class="btn-error"/>
+                <div>
+                    <x-button wire:click="bulkDelete" wire:confirm="Are you sure to deleted the selected items?" spinner
+                              label="Delete Selected" icon="o-trash" responsive class="btn-error"/>
+                    <x-button @click="$wire.moveItemModal=true;
+                    $wire.getFolders()
+                    "
+                              spinner
+                              label="Move" icon="o-arrow-left-start-on-rectangle"
+                              responsive class="btn-accent"/>
+                </div>
             </template>
             <x-input placeholder="Search..." wire:model.live.debounce="search" clearable icon="o-magnifying-glass"/>
 
@@ -595,14 +354,45 @@ new class extends Component {
 
     </x-card>
 
-    {{--ADD MODAL--}}
-    <x-modal wire:model="addModal" title="New Folder" box-class="w-80">
-        <x-form wire:submit="save" no-separator>
-            <x-input wire:model="name" id="folder-name"/>
-            <x-slot:actions>
-                <x-button type="submit" label="Confirm" class="btn-primary" spinner="save"/>
-                <x-button label="Cancel" @click="$wire.addModal = false"/>
-            </x-slot:actions>
+    {{--ADD Folder MODAL--}}
+    <x-modal wire:model="addFolderModal" title="New Folder" box-class="w-80">
+        <x-form wire:submit="saveFolder" no-separator>
+            <div x-trap.inert="$wire.addFolderModal">
+                <x-input wire:model="name" id="folder-name"/>
+
+                <x-slot:actions>
+                    <x-button label="Cancel" @click="$wire.set('addFolderModal',false)"/>
+                    <x-button type="submit" label="Create" class="btn-primary" spinner="saveFolder"/>
+                </x-slot:actions>
+            </div>
+        </x-form>
+    </x-modal>
+
+    {{--EDIT MODAL--}}
+    <x-modal wire:model="editFolderModal" title="Rename Folder" box-class="w-80">
+        <x-form wire:submit="updateFolder($wire.folderId)" no-separator>
+            <div x-trap.inert="$wire.editFolderModal">
+                <x-input wire:model="name"/>
+
+                <x-slot:actions>
+                    <x-button label="Cancel" @click="$wire.set('editFolderModal',false);$wire.cancelModal()"/>
+                    <x-button type="submit" label="Confirm" class="btn-primary" spinner="updateFolder"/>
+                </x-slot:actions>
+            </div>
+        </x-form>
+    </x-modal>
+
+    {{--Rename file MODAL--}}
+    <x-modal wire:model="renameFile" title="Rename File" box-class="w-80">
+        <x-form wire:submit="updateFilename($wire.folderId)" no-separator>
+            <div x-trap.inert="$wire.renameFile">
+                <x-input wire:model="name"/>
+
+                <x-slot:actions>
+                    <x-button label="Cancel" @click="$wire.set('renameFile',false);$wire.cancelModal"/>
+                    <x-button type="submit" label="Confirm" class="btn-primary" spinner="save"/>
+                </x-slot:actions>
+            </div>
         </x-form>
     </x-modal>
 
@@ -612,60 +402,115 @@ new class extends Component {
         <x-form wire:submit="saveFile" no-separator>
             <x-hr/>
 
+            <template x-if="$wire.uploadOption === 'filepond'">
+                <div>
+                    <x-filepond::upload wire:model="file"
+                                        type="file"
+                                        allow-reorder
+                                        item-insert-interval="0"
+                                        multiple
+                                        drop-on-page
+                                        required
+                                        drop-on-element="false"
+                    />
+                    @error("file.*")
+                    <x-alert :title="$message" icon="o-exclamation-triangle" class="text-xs alert-error"/>
+                    @enderror
+                </div>
+            </template>
 
-            {{--            <x-filepond::upload wire:model="file"--}}
-            {{--                                type="file"--}}
-            {{--                                allow-reorder--}}
-            {{--                                item-insert-interval="0"--}}
-            {{--                                multiple--}}
-            {{--                                drop-on-page--}}
-            {{--                                required--}}
-            {{--                                drop-on-element="false"--}}
-            {{--            />--}}
-            <template x-if="!$wire.processingFiles">
-                <x-file wire:model="file" label="Documents" multiple/>
+            <template x-if="$wire.uploadOption === 'standard'">
+                <x-file wire:model="file" label="" required multiple/>
             </template>
             <div wire:loading wire:target="file">Uploading...
                 <x-loading/>
             </div>
 
-            @error("file.*")
-            <x-alert :title="$message" icon="o-exclamation-triangle"/>
-            @enderror
+            {{--            <template x-if="$wire.processingFiles">--}}
+            {{--                <div class="mt-2">--}}
+            {{--                    <div class="flex mb-2 items-center justify-between align-middle">--}}
+            {{--                        <div x-html="$wire.uploadStatusMessage"--}}
+            {{--                             class="text-xs truncate w-1/2 max-w-64 text-ellipsis overflow-hidden ..."></div>--}}
+            {{--                        <div class="text-xs font-semibold mt-1 text-teal-600">--}}
+            {{--                            <span x-text="Math.round($wire.progress) + '%'"></span>--}}
+            {{--                        </div>--}}
+            {{--                    </div>--}}
 
-            <template x-if="$wire.processingFiles">
-                <div class="mt-2">
-                    <div class="flex mb-2 items-center justify-between align-middle">
-                        <div x-html="$wire.uploadStatusMessage"
-                             class="text-xs truncate w-1/2 max-w-64 text-ellipsis overflow-hidden ..."></div>
-                        <div class="text-xs font-semibold mt-1 text-teal-600">
-                            <span x-text="Math.round($wire.progress) + '%'"></span>
-                        </div>
-                    </div>
-
-                    <x-progress value="{{$progress}}" max="100" class="progress-primary h-0.5"/>
-                </div>
-            </template>
-            {{--            <div class="flex justify-end">--}}
-            {{--                <x-button label="Cancel" @click="$wire.addFile = false;$wire.cancelModal()"/>--}}
-            {{--                <button class="btn btn-primary">--}}
-            {{--                    <span wire:loading.remove>Upload</span>--}}
-            {{--                    <span wire:loading>Uploading</span>--}}
-            {{--                    <span><x-loading wire:loading class="loading-dots"/></span>--}}
-            {{--                </button>--}}
-            {{--            </div>--}}
-            <x-slot:actions>
-
-                <x-button label="Cancel" @click="$wire.addFile = false;"/>
-
-                <x-button wire:loading.remove wire:target="processNextFile"
-                          @click="$wire.processingFiles = true;
-                          $wire.uploadStatusMessage = 'Preparing to process files ...'"
-                          type="submit" label="Upload"
-                          class="btn-primary" spinner="processNextFile"/>
-
-            </x-slot:actions>
+            {{--                    <x-progress value="{{$progress}}" max="100" class="progress-primary h-0.5"/>--}}
+            {{--                </div>--}}
+            {{--            </template>--}}
+            <div class="flex justify-end">
+                <x-button label="Cancel"
+                          {{--                              @click="$wire.addFile = false;$wire.cancelModal()"--}}
+                          {{--                              @click="$wire.$refresh();$wire.addFile = false;"--}}
+                          @click="$wire.addFile = false;window.location.reload()"
+                />
+                <button class="btn btn-primary">
+                    <span wire:loading.remove>Submit</span>
+                    <span wire:loading wire:target="saveFile">Submitting</span>
+                    <span><x-loading wire:loading class="loading-dots"/></span>
+                </button>
+            </div>
         </x-form>
+    </x-modal>
+
+    <x-modal wire:model="moveItemModal" title="Move Items" box-class="w-4/5 bg-opacity-50">
+        <x-toast/>
+        <x-hr/>
+        <div x-data="{folderName:null }">
+            <ul class="menu menu-xs bg-base-200 rounded-lg w-full my-2">
+                @foreach ($tree as $folder)
+                    <li>
+                        @if (isset($folder->children_tree) && count($folder->children_tree) > 0)
+                            <details>
+                                <summary
+                                    @click="$wire.selectedFolder = {{ $folder->id }};
+                                    folderName = '{{$folder->name}}';"
+                                    :class="{ 'bg-blue-500 text-white': $wire.selectedFolder === {{ $folder->id }} }"
+                                >
+                                    📂 {{ $folder->name }}
+                                </summary>
+                                <ul>
+                                    <x-folder-children :children="$folder->children_tree"/>
+                                </ul>
+                            </details>
+                        @else
+                            <a
+                                @click="$wire.selectedFolder = {{ $folder->id }};folderName = '{{$folder->name}}';"
+                                :class="{ 'bg-blue-500 text-white': $wire.selectedFolder === {{ $folder->id }} }"
+                            >
+                                📂 {{ $folder->name }}
+                            </a>
+                        @endif
+                    </li>
+                @endforeach
+
+            </ul>
+            <div class="flex justify-between align-middle">
+                <div class="">
+
+                </div>
+
+                <div class="">
+                    <x-button label="Cancel" @click="$wire.moveItemModal = false;
+                $wire.selectedFolder=0;folderName=null"/>
+                    <button wire:click="moveItems" class=" btn btn-primary">
+                        Move
+                        <template x-if="folderName">
+                        <span>
+                            to <span x-text="folderName"></span>
+                        </span>
+                        </template>
+                        <span wire:loading wire:target="moveItems">
+                    <x-loading/>
+                    </span>
+                    </button>
+                </div>
+
+            </div>
+
+        </div>
+
     </x-modal>
 
 

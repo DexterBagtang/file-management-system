@@ -1,29 +1,36 @@
 <?php
 
+use App\Livewire\FolderManager;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Rule;
 use Livewire\Volt\Component;
 use App\Models\Folder;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\Rule as ValidationRule;
+use Illuminate\Support\Facades\DB;
+use Livewire\WithPagination;
+use Mary\Traits\Toast;
+
 
 // Alias the Rule class
 
 
 new class extends Component {
-    use \Mary\Traits\Toast;
-    use \Livewire\WithPagination;
+    use Toast;
+    use WithPagination;
+    use FolderManager;
 
     public string $search = '';
-    public bool $drawer = false;
-    public bool $editModal = false;
+    public bool $addFolderModal = false;
+    public bool $editFolderModal = false;
     public int $folderId;
-    public array $sortBy = ['column' => 'id', 'direction' => 'desc'];
+    public array $sortBy = ['column' => 'updated_at', 'direction' => 'desc'];
     public int $filterCount = 0;
     public array $selected = [];
 
     #[Rule('required')]
     public string $name;
+
 
     // Clear filters
     public function clear(): void
@@ -37,46 +44,6 @@ new class extends Component {
     {
         $folder->delete();
         $this->warning("$folder->name deleted", 'Good bye!', position: 'toast-bottom');
-    }
-
-    public function save()
-    {
-        $this->validate([
-            'name' => [
-                'required',
-                ValidationRule::unique('folders')->where(function ($query) {
-                    return $query->where('parent_id', null);
-                })]
-        ],
-            [
-                'name.unique' => 'A folder with this name already exists in this location. Please choose a different name.',
-            ]);
-
-        Folder::create([
-            'name' => $this->name,
-            'user_id' => auth()->user()->id,
-        ]);
-
-        $this->reset();
-
-        $this->drawer = false;
-
-        $this->success('Folder created successfully.');
-
-    }
-
-    public function update(Folder $folder)
-    {
-        $data = $this->validate();
-
-        $folder->update($data);
-
-        $this->reset();
-
-        $this->editModal = false;
-
-        $this->success('Folder updated successfully.');
-
     }
 
 
@@ -100,16 +67,22 @@ new class extends Component {
             ->join('users', 'folders.user_id', '=', 'users.id')
             ->when($this->search, fn(Builder $q) => $q->where('folders.name', 'like', "%$this->search%"))
             ->orderBy(...array_values($this->sortBy))
-            ->paginate(10);
+            ->paginate(100);
+//         Perform a Scout search first
+//        return Folder::search($this->search)
+//            ->query(function (Builder $query) {
+//                $query->whereNull('parent_id')
+//                    ->where('folders.user_id', Auth::id())
+//                    ->select('folders.*', 'users.name as owner')
+//                    ->join('users', 'folders.user_id', '=', 'users.id')
+//                    ->orderBy(...array_values($this->sortBy));
+//            })
+//            ->paginate(100);
     }
 
-    public function bulkDelete(){
-        $folders = Folder::query()->whereIn('id',$this->selected)->get();
-        $folders->each->delete();
-
-        $this->reset('selected');
-
-        $this->warning("Selected items deleted", 'Good bye!', position: 'toast-bottom');
+    public function bulkDelete()
+    {
+        $this->bulkDeleteItems($this->selected);
     }
 
     public function with(): array
@@ -119,14 +92,24 @@ new class extends Component {
             'headers' => $this->headers(),
         ];
     }
+
     // Reset pagination when any component property changes
     public function updated($property): void
     {
-        if (! is_array($property) && $property != "") {
+        if (!is_array($property) && $property != "") {
             $this->resetPage();
         }
 //        $this->filter_count = $this->calculateFilterCount();
     }
+
+
+    public bool $moveItemModal = false;
+
+    public function mount()
+    {
+        $this->getFolders();
+    }
+
 
 }; ?>
 
@@ -134,20 +117,11 @@ new class extends Component {
     <!--HEADER-->
     <x-header title="Home" separator progress-indicator>
         <x-slot:middle>
-            <x-input placeholder="Search..." wire:model.live.debounce="search" clearable icon="o-magnifying-glass"/>
+            {{--            <x-input placeholder="Search..." wire:model.live.debounce="search" clearable icon="o-magnifying-glass"/>--}}
         </x-slot:middle>
         <x-slot:actions>
-                <x-button label="New Folder" @click="$wire.drawer = true;$wire.name=''" class="btn-primary" icon="s-plus"/>
-{{--            --}}{{-- Custom trigger  --}}
-{{--            <x-dropdown>--}}
-{{--                <x-slot:trigger>--}}
-{{--                    <x-button label="New" icon="s-plus" class="btn-primary"/>--}}
-{{--                </x-slot:trigger>--}}
-
-{{--                <x-menu-item title="Folder" @click="$wire.drawer = true;$wire.name=''" icon="o-folder-plus"/>--}}
-{{--                <x-menu-separator/>--}}
-{{--                <x-menu-item title="File" icon="o-document-arrow-up"/>--}}
-{{--            </x-dropdown>--}}
+            <x-button label="New Folder" @click="$wire.addFolderModal = true;$wire.name=''" class="btn-primary"
+                      icon="s-plus"/>
         </x-slot:actions>
 
     </x-header>
@@ -157,8 +131,8 @@ new class extends Component {
         @if($folders->total() != 0)
             <x-table :headers="$headers" :rows="$folders" :sort-by="$sortBy"
                      wire:model="selected"
-                     selectable
                      with-pagination
+                     selectable
                      @row-selection="console.log($event.detail)"
                      link="/folders/{id}/show"
             >
@@ -171,7 +145,7 @@ new class extends Component {
                 @scope('actions', $folder)
                 <div class="flex">
                     <x-button icon="o-pencil"
-                              @click="$wire.editModal = true; $wire.name = '{{$folder['name']}}';
+                              @click="$wire.editFolderModal = true; $wire.name = '{{$folder['name']}}';
                           $wire.folderId={{$folder['id']}}" spinner
                               class="btn-ghost btn-sm text-blue-500"/>
 
@@ -189,34 +163,100 @@ new class extends Component {
         @endif
         <x-slot:menu>
             <template x-if="$wire.selected.length > 0">
-                <x-button wire:click="bulkDelete" wire:confirm="Are you sure to deleted the selected items?" spinner
-                          label="Delete Selected" icon="o-trash" class="btn-error"/>
+                <div>
+                    <x-button wire:click="bulkDelete" wire:confirm="Are you sure to deleted the selected items?" spinner
+                              label="Delete Selected" icon="o-trash" class="btn-error"/>
+                    <x-button @click="$wire.moveItemModal=true;
+                    $wire.getFolders()
+                    "
+                              spinner
+                              label="Move" icon="o-arrow-left-start-on-rectangle"
+                              responsive class="btn-accent"/>
+                </div>
             </template>
             <x-input placeholder="Search..." wire:model.live.debounce="search" clearable icon="o-magnifying-glass"/>
         </x-slot:menu>
     </x-card>
 
     {{--ADD MODAL--}}
-    <x-modal wire:model="drawer" title="New Folder" box-class="w-80">
-        <x-form wire:submit="save" no-separator>
-            <x-input wire:model="name"/>
+    <x-modal wire:model="addFolderModal" title="New Folder" box-class="w-80">
+        <x-form wire:submit="saveFolder" no-separator>
+            <div x-trap="$wire.addFolderModal">
+                <x-input wire:model="name"/>
 
-            <x-slot:actions>
-                <x-button label="Cancel" @click="$wire.drawer = false"/>
-                <x-button type="submit" label="Confirm" class="btn-primary" spinner="save"/>
-            </x-slot:actions>
+                <x-slot:actions>
+                    <x-button label="Cancel" @click="$wire.addFolderModal = false"/>
+                    <x-button type="submit" label="Create" class="btn-primary" spinner="saveFolder"/>
+                </x-slot:actions>
+            </div>
         </x-form>
     </x-modal>
 
     {{--EDIT MODAL--}}
-    <x-modal wire:model="editModal" title="Edit Folder" box-class="w-80">
-        <x-form wire:submit="update($wire.folderId)" no-separator>
-            <x-input wire:model="name"/>
+    <x-modal wire:model="editFolderModal" title="Edit Folder" box-class="w-80">
+        <x-form wire:submit="updateFolder($wire.folderId)" no-separator>
+            <div x-trap="$wire.editFolderModal">
+                <x-input wire:model="name"/>
 
-            <x-slot:actions>
-                <x-button label="Cancel" @click="$wire.editModal = false"/>
-                <x-button type="submit" label="Confirm" class="btn-primary" spinner="save"/>
-            </x-slot:actions>
+                <x-slot:actions>
+                    <x-button label="Cancel" @click="$wire.editFolderModal = false"/>
+                    <x-button type="submit" label="Confirm" class="btn-primary" spinner="updateFolder"/>
+                </x-slot:actions>
+
+            </div>
         </x-form>
+    </x-modal>
+
+    <x-modal wire:model="moveItemModal" title="Move Items" box-class="w-4/5">
+        <x-toast/>
+        <x-hr/>
+        <div x-data="{ folderName:null }">
+            <ul class="menu menu-xs bg-base-200 rounded-lg w-full my-2">
+
+                @foreach ($tree as $branch)
+                    <li>
+                        @if (isset($branch->children_tree) && count($branch->children_tree) > 0)
+                            <details>
+                                <summary
+                                    @click="$wire.selectedFolder = {{ $branch->id }};
+                                folderName = '{{$branch->name}}';"
+                                    :class="{ 'bg-blue-500 text-white': $wire.selectedFolder === {{ $branch->id }} }"
+                                >
+                                    📂 {{ $branch->name }}
+                                </summary>
+                                <ul>
+                                    <x-folder-children :children="$branch->children_tree"/>
+                                </ul>
+                            </details>
+                        @else
+                            <a
+                                @click="$wire.selectedFolder = {{ $branch->id }};folderName = '{{$branch->name}}';"
+                                :class="{ 'bg-blue-500 text-white': $wire.selectedFolder === {{ $branch->id }} }"
+                            >
+                                📂 {{ $branch->name }}
+                            </a>
+                        @endif
+                    </li>
+                @endforeach
+
+            </ul>
+
+            <div class="float-end">
+                <x-button label="Cancel" @click="$wire.moveItemModal = false;
+                $wire.selectedFolder=0;folderName=null"/>
+                <button wire:click="moveItems" class=" btn btn-primary">
+                    Move
+                    <template x-if="folderName">
+                        <span>
+                            to <span x-text="folderName"></span>
+                        </span>
+                    </template>
+                    <span wire:loading wire:target="moveItems">
+                    <x-loading/>
+                    </span>
+                </button>
+            </div>
+        </div>
+
     </x-modal>
 </div>

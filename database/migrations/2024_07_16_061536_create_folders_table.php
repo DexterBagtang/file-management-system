@@ -17,7 +17,9 @@ return new class extends Migration
             $table->string('name');
             $table->foreignId('parent_id')->nullable()->constrained('folders')->onDelete('cascade');
             $table->timestamps();
-            $table->unique(['parent_id', 'name']);
+            $table->unique(['parent_id','name','deleted_at']);
+            $table->softDeletes();
+
         });
     }
 

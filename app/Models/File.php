@@ -4,10 +4,26 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Laravel\Scout\Attributes\SearchUsingFullText;
+use Laravel\Scout\Searchable;
 
 class File extends Model
 {
     use HasFactory;
+    use SoftDeletes;
+    use Searchable;
+
+    #[SearchUsingFullText(['contents'])]
+    public function toSearchableArray()
+    {
+        return [
+            'name' => $this->name,
+            'contents' => $this->contents,
+            'metadata' => $this->metadata,
+            // Include other fields you want to be searchable
+        ];
+    }
 
     protected $guarded = ['id'];
 
@@ -20,4 +36,5 @@ class File extends Model
     {
         return $this->belongsTo(Folder::class);
     }
+
 }

@@ -8,14 +8,15 @@
 
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
-{{--    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css" />--}}
+
+    {{--    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css" />--}}
 {{--    <script src="https://cdn.tiny.cloud/1/hig1x5mbm0n2pf4r7aoepels1lrh2o3n7em35rshwsvb7jee/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>--}}
 
     @filepondScripts
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 
 </head>
-<body class="min-h-screen font-sans antialiased bg-base-200/50 dark:bg-base-200">
+<body class="min-h-screen font-sans antialiased bg-base-200/50 dark:bg-base-200" x-data>
 
 {{-- The navbar with `sticky` and `full-width` --}}
 <x-nav sticky full-width>
@@ -32,8 +33,14 @@
 
     </x-slot:brand>
 
+
     {{-- Right side actions --}}
     <x-slot:actions>
+        <nav class="w-1/2">
+            {{--             Notice `@click.stop` --}}
+            <x-button label="Search Folders or Files" icon="o-magnifying-glass" class="btn-outline btn-block" @click.stop="$dispatch('mary-search-open')" />
+
+        </nav>
         <x-button label="Messages" icon="o-envelope" link="###" class="btn-ghost btn-sm" responsive />
         <x-button label="Notifications" icon="o-bell" link="###" class="btn-ghost btn-sm" responsive />
         <x-theme-toggle class="btn btn-circle" />
@@ -68,6 +75,8 @@
 {{--                <x-menu-item title="Home" icon="o-sparkles" link="/" />--}}
                 <x-menu-item title="Home" icon="o-home" link="/" />
                 <x-menu-item title="Users" icon="o-users" link="/users" />
+                <x-menu-item title="Trash" icon="o-trash" link="/trash" />
+
                 <x-menu-sub title="Settings" icon="o-cog-6-tooth">
                     <x-menu-item title="Wifi" icon="o-wifi" link="####" />
                     <x-menu-item title="Archives" icon="o-archive-box" link="####" />
@@ -86,7 +95,22 @@
     <x-toast />
 
     {{-- Spotlight --}}
-    <x-spotlight />
+<x-spotlight
+    search-text="Find your files or folders..."
+>
+    <div
+        x-data="{ query: { withFolders: true, withFiles: true } }"
+        x-init="$watch('query', value => $dispatch('mary-search', new URLSearchParams(value).toString()))"
+        class="flex gap-8 p-3"
+    >
+{{--        <x-checkbox type="radio" label="All" x-model="query.withAll" />--}}
+        <x-checkbox type="radio" label="Folders" x-model="query.withFolders" />
+        <x-checkbox type="radio" label="Files" x-model="query.withFiles" />
+
+    </div>
+
+</x-spotlight>
+
 
     {{-- Theme toggle --}}
     <x-theme-toggle class="hidden" />
