@@ -1,15 +1,15 @@
 <?php
 
 use App\Livewire\FolderManager;
+use App\Livewire\ShareManager;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Rule;
 use Livewire\Volt\Component;
 use App\Models\Folder;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Validation\Rule as ValidationRule;
-use Illuminate\Support\Facades\DB;
 use Livewire\WithPagination;
 use Mary\Traits\Toast;
+use App\Models\User;
 
 
 // Alias the Rule class
@@ -18,7 +18,8 @@ use Mary\Traits\Toast;
 new class extends Component {
     use Toast;
     use WithPagination;
-    use FolderManager;
+    use FolderManager, ShareManager;
+
 
     public string $search = '';
     public bool $addFolderModal = false;
@@ -51,7 +52,6 @@ new class extends Component {
     {
         return [
 //            ['key' => 'avatar', 'label' => '', 'class' => 'w-1'],
-            ['key' => 'id', 'label' => '#', 'class' => 'w-1'],
             ['key' => 'name', 'label' => 'Name', 'class' => 'w-64'],
             ['key' => 'owner', 'label' => 'Owner', 'class' => 'hidden lg:table-cell'],
             ['key' => 'created_at', 'label' => 'Date Created'],
@@ -64,6 +64,7 @@ new class extends Component {
             ->whereNull('parent_id')
             ->where('folders.user_id', Auth::id())
             ->select('folders.*', 'users.name as owner')
+            ->withCount(['files', 'children'])
             ->join('users', 'folders.user_id', '=', 'users.id')
             ->when($this->search, fn(Builder $q) => $q->where('folders.name', 'like', "%$this->search%"))
             ->orderBy(...array_values($this->sortBy))
@@ -80,6 +81,7 @@ new class extends Component {
 //            ->paginate(100);
     }
 
+
     public function bulkDelete()
     {
         $this->bulkDeleteItems($this->selected);
@@ -90,6 +92,8 @@ new class extends Component {
         return [
             'folders' => $this->folders(),
             'headers' => $this->headers(),
+            'usersList' => User::all()->except(Auth::id()),
+
         ];
     }
 
@@ -111,9 +115,11 @@ new class extends Component {
     }
 
 
+
 }; ?>
 
 <div>
+    {{--    @dd($folders)--}}
     <!--HEADER-->
     <x-header title="Home" separator progress-indicator>
         <x-slot:middle>
@@ -130,6 +136,7 @@ new class extends Component {
     <x-card title="Folders">
         @if($folders->total() != 0)
             <x-table :headers="$headers" :rows="$folders" :sort-by="$sortBy"
+                     class="table-xs"
                      wire:model="selected"
                      with-pagination
                      selectable
@@ -138,7 +145,8 @@ new class extends Component {
             >
 
                 @scope('cell_name',$folder)
-                {{'📂'.$folder->name}}
+                <div>{{'📂'.$folder->name}}</div>
+                <small class="ms-2">{{($folder->files_count + $folder->children_count ) .' items'}}</small>
                 @endscope
 
 
@@ -171,6 +179,10 @@ new class extends Component {
                     "
                               spinner
                               label="Move" icon="o-arrow-left-start-on-rectangle"
+                              responsive class="btn-accent"/>
+                    <x-button @click="$wire.shareModal=true;"
+                              spinner
+                              label="Share" icon="o-share"
                               responsive class="btn-accent"/>
                 </div>
             </template>
@@ -257,6 +269,37 @@ new class extends Component {
                 </button>
             </div>
         </div>
+
+    </x-modal>
+
+    {{--Share Folder MODAL--}}
+    <x-modal wire:model="shareModal" title="Share Items" box-class="w-full max-h-screen" persistent>
+        <x-form wire:submit="shareItems(true)" class="h-96" no-separator id="shareForm">
+            <div class="flex flex-col h-96 justify-between">
+                <div x-trap.inert="$wire.shareModal">
+                    <x-choices-offline
+                        label="Add user"
+                        icon="o-users"
+                        wire:model="shareTo"
+                        option-label="name"
+                        option-sub-label="email"
+                        :options="$usersList"
+                        hint="Add multiple users"
+                        searchable
+                        required
+                    />
+                </div>
+
+
+                {{--                        <x-slot:actions>--}}
+                <div class="text-end">
+                    <x-button label="Cancel" @click="$wire.set('shareModal',false)"/>
+                    <x-button type="submit" label="Share" class="btn-primary" spinner="saveFolder"/>
+                </div>
+                {{--                        </x-slot:actions>--}}
+            </div>
+        </x-form>
+
 
     </x-modal>
 </div>

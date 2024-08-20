@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Models\File;
 use App\Models\Folder;
+use App\Models\SharedItem;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -65,16 +66,71 @@ trait FolderManager
 
     }
 
-    public function buildBreadcrumbs()
+//    public function buildBreadcrumbs($checkShared = false)
+//    {
+////        dd($this->currentFolder->id);
+//        $this->breadcrumbs = [];
+//        $folder = Folder::find($this->currentFolder->id ?? null);
+//
+//        while ($folder) {
+//            // If we need to check if the folder is shared
+//            if ($checkShared) {
+//                $isShared = SharedItem::where('item_type', 'folder')
+//                    ->where('item_id', $folder->id)
+//                    ->where('shared_with_id', Auth::id())
+//                    ->exists();
+//
+//                if (!$isShared) {
+//                    break; // Stop if the folder is not shared
+//                }
+//            }
+//
+//            array_unshift($this->breadcrumbs, $folder);
+//            $folder = $folder->parent;
+//        }
+//    }
+    public function buildBreadcrumbs($checkShared = false)
     {
         $this->breadcrumbs = [];
-        $folder = Folder::find($this->currentFolder->id ?? null);
+        $folder = $this->currentFolder;
 
         while ($folder) {
+            // If we need to check if the folder is shared
+            if ($checkShared) {
+                // Check if the folder is shared or if it's a parent folder that's shared
+                $isShared = SharedItem::where('item_type', 'folder')
+                    ->where('item_id', $folder->id)
+                    ->where('shared_with_id', Auth::id())
+                    ->exists();
+
+                if (!$isShared && !$this->areParentsShared ($folder->id)) {
+                    break; // Stop if the folder and its parents are not shared
+                }
+            }
+
             array_unshift($this->breadcrumbs, $folder);
             $folder = $folder->parent;
         }
     }
+
+    public function areParentsShared (int $folderId): bool
+    {
+        $folder = Folder::find($folderId);
+
+        while ($folder) {
+            // Check if the current folder is shared
+            if ($folder->shares()->where('shared_with_id', Auth::id())->exists()) {
+                return true;
+            }
+
+            // Move to the parent folder
+            $folder = $folder->parent_id ? Folder::find($folder->parent_id) : null;
+        }
+
+        return false;
+    }
+
+
 
     public function getFolderTree()
     {

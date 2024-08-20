@@ -2,10 +2,10 @@
 
 use App\Livewire\FileManager;
 use App\Livewire\FolderManager;
-use App\Livewire\Forms\FileForm;
-use App\Livewire\Forms\FolderForm;
+use App\Livewire\ShareManager;
 use App\Models\File;
 use App\Models\Folder;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
@@ -14,27 +14,17 @@ use Livewire\WithPagination;
 use Livewire\WithFileUploads;
 use Mary\Traits\Toast;
 use Spatie\LivewireFilepond\WithFilePond;
-use Livewire\Attributes\Validate;
 use Illuminate\Support\Facades\DB;
-use Livewire\Attributes\On;
-use Illuminate\Support\Facades\Storage;
-use App\Jobs\ProcessFile;
 use Illuminate\Support\Str;
-
-
-use Spatie\PdfToImage\Pdf;
-use thiagoalessio\TesseractOCR\TesseractOCR;
-use thiagoalessio\TesseractOCR\UnsuccessfulCommandException;
-use Livewire\Attributes\Rule;
 
 
 new class extends Component {
     use WithFilePond;
     use WithFileUploads;
     use Toast, WithPagination;
-    use FolderManager, FileManager;
+    use FolderManager, FileManager, ShareManager;
 
-    public Folder $currentFolder;
+    public $currentFolder;
     public string $search = '';
     public bool $addFolderModal = false;
     public bool $editFolderModal = false;
@@ -43,11 +33,11 @@ new class extends Component {
     public string $selectedTab = 'all';
     public bool $submitFile = false;
     public string $uploadStatusMessage = '';
-    public string $uploadOption = '';
     public string $name;
     public bool $isRenaming = false;
     public int $folderId;
     public bool $moveItemModal = false;
+    public string $uploadOption;
 
 //    #[Rule('required')]
     public array $file = [];
@@ -55,10 +45,22 @@ new class extends Component {
     public bool $renameFile = false;
 
 
-
     public function mount($id): void
     {
-        $this->currentFolder = Folder::findOrFail($id);
+        $this->currentFolder = Folder::where('id', $id)
+            ->where(function($query) {
+                $query->where('user_id', Auth::id()) // Owned by user
+                    ->orWhereHas('shares', function($query) {
+                        $query->where('shared_with_id', Auth::id()); // Shared with user
+                    })
+                ;
+            })
+            ->first();
+
+        if (!$this->currentFolder) {
+            abort(403,"Unauthorized User"); // Throws a 404 error
+        }
+
         $this->getFolders();
         $this->buildBreadcrumbs();
     }
@@ -72,6 +74,7 @@ new class extends Component {
             // Fetch folders
             $folders = Folder::query()
                 ->select('folders.*', 'users.name as owner', DB::raw("'folder' as type"))
+                ->withCount(['files','children'])
                 ->where('parent_id', $this->currentFolder->id ?? null)
                 ->join('users', 'folders.user_id', '=', 'users.id')
                 ->when($this->search, fn($q) => $q->where('folders.name', 'like', "%$this->search%"))
@@ -80,37 +83,15 @@ new class extends Component {
         }
 
         if ($this->selectedTab == 'all' || $this->selectedTab == 'files') {
-            // Fetch files
-//            $files = File::query()
-//                ->select('files.*', 'users.name as owner', DB::raw("'file' as type"))
-//                ->where('folder_id', $this->currentFolder->id ?? null)
-//                ->join('users', 'files.user_id', '=', 'users.id')
-//                ->when($this->search, fn($q) => $q->where('files.name', 'like', "%$this->search%")
-//                    ->orWhere('files.contents', 'like', "%$this->search%"))
-//                ->get()
-//                ->toArray();
 
-            // Perform a Scout search first
+            // Perform a Scout search
             $filesQuery = File::search($this->search)
                 ->query(function (Builder $query) {
                     $query->select('files.*', 'users.name as owner', DB::raw("'file' as type"))
-                    ->join('users', 'files.user_id', '=', 'users.id')
-                    ->where('folder_id', $this->currentFolder->id ?? null)
-                    ;
-            })->get();
+                        ->join('users', 'files.user_id', '=', 'users.id')
+                        ->where('folder_id', $this->currentFolder->id ?? null);
+                })->get();
             $files = $filesQuery->toArray();
-
-//            //MYsql built in full text search
-//            $files = File::query()
-//                ->select('files.*', 'users.name as owner', DB::raw("'file' as type"))
-//                ->where('folder_id', $this->currentFolder->id ?? null)
-//                ->join('users', 'files.user_id', '=', 'users.id')
-//                ->when($this->search, fn($q) => $q->where('files.name', 'like', "%$this->search%")
-////                    ->orWhere('files.contents', 'like', "%$this->search%")
-//                    ->orWhereRaw("MATCH(contents) AGAINST(? IN BOOLEAN MODE)", [$this->search])
-//                )
-//                ->get()
-//                ->toArray();
         }
 
         // Merge folders and files based on the selected tab
@@ -141,6 +122,7 @@ new class extends Component {
             'folderFiles' => $this->mergedData(),
             'headers' => $this->headers(),
             'formattedJson' => $this->formattedArray(),
+            'usersList' => User::all()->except(Auth::id()),
         ];
     }
 
@@ -173,7 +155,7 @@ new class extends Component {
 
     public function bulkDelete()
     {
-        $this->bulkDeleteItems($this->selected,false);
+        $this->bulkDeleteItems($this->selected, false);
     }
 
 
@@ -205,17 +187,14 @@ new class extends Component {
     }
 
 
-
-
-
 };
 ?>
 
 <div>
     <x-header title="" separator progress-indicator>
-{{--        <x-slot:middle>--}}
-{{--            <x-input placeholder="Search..." wire:model.live.debounce="search" clearable icon="o-magnifying-glass"/>--}}
-{{--        </x-slot:middle>--}}
+        {{--        <x-slot:middle>--}}
+        {{--            <x-input placeholder="Search..." wire:model.live.debounce="search" clearable icon="o-magnifying-glass"/>--}}
+        {{--        </x-slot:middle>--}}
         <x-slot:actions>
             {{--            <x-button label="New" @click="$wire.drawer = true;$wire.name=''" class="btn-primary" icon="s-plus"/>--}}
             {{-- Custom trigger  --}}
@@ -265,7 +244,8 @@ new class extends Component {
         <x-selection-actions :formattedJson="$formattedJson"/>
 
         @if(count($folderFiles) != 0)
-            <x-table :headers="$headers" :rows="$folderFiles" class="table-xs" :sort-by="$sortBy">
+            <x-table :headers="$headers" :rows="$folderFiles"
+                     class="table-xs" :sort-by="$sortBy">
 
                 @scope('header_select', $folderFile)
                 @endscope
@@ -282,14 +262,15 @@ new class extends Component {
                 @scope('cell_name', $folderFile)
                 @if($folderFile['type'] === 'folder')
                     <a wire:navigate href="/folders/{{ $folderFile['id'] }}/show">
-                        📂 {{ Str::limit($folderFile['name'],60) }}
+                        <div>📂 {{ Str::limit($folderFile['name'],60) }}</div>
+                        <small class="ms-2">{{($folderFile['files_count'] + $folderFile['children_count'] ) .' items'}}</small>
                     </a>
-                @else
-{{--                    <a href="{{Storage::url($folderFile['path'])}}" target="_blank">--}}
-{{--                        📄 {{ Str::limit($folderFile['name'],60) }}--}}
-{{--                    </a>--}}
 
-                    <a wire:navigate href="/file/{{$folderFile['id']}}/view" >
+
+
+                @else
+
+                    <a wire:navigate href="/file/{{$folderFile['id']}}/view">
                         📄 {{ Str::limit($folderFile['name'],60) }}
                     </a>
                 @endif
@@ -340,11 +321,14 @@ new class extends Component {
                 <div>
                     <x-button wire:click="bulkDelete" wire:confirm="Are you sure to deleted the selected items?" spinner
                               label="Delete Selected" icon="o-trash" responsive class="btn-error"/>
-                    <x-button @click="$wire.moveItemModal=true;
-                    $wire.getFolders()
-                    "
+                    <x-button @click="$wire.moveItemModal=true;$wire.getFolders()"
                               spinner
                               label="Move" icon="o-arrow-left-start-on-rectangle"
+                              responsive class="btn-accent"/>
+
+                    <x-button @click="$wire.shareModal=true;"
+                              spinner
+                              label="Share" icon="o-share"
                               responsive class="btn-accent"/>
                 </div>
             </template>
@@ -454,7 +438,8 @@ new class extends Component {
         </x-form>
     </x-modal>
 
-    <x-modal wire:model="moveItemModal" title="Move Items" box-class="w-4/5 bg-opacity-50">
+    {{--Move items MODAL--}}
+    <x-modal wire:model="moveItemModal" title="Move Items" box-class="w-4/5">
         <x-toast/>
         <x-hr/>
         <div x-data="{folderName:null }">
@@ -513,6 +498,35 @@ new class extends Component {
 
     </x-modal>
 
+    {{--Share Folder MODAL--}}
+    <x-modal wire:model="shareModal" title="Share Items" box-class="w-full max-h-screen" persistent>
+        <x-form wire:submit="shareItems" class="h-96" no-separator id="shareForm">
+            <div class="flex flex-col h-96 justify-between">
+                <div x-trap.inert="$wire.shareModal">
+                    <x-choices-offline
+                        label="Add user"
+                        icon="o-users"
+                        wire:model="shareTo"
+                        option-label="name"
+                        option-sub-label="email"
+                        :options="$usersList"
+                        hint="Add multiple users"
+                        searchable
+                    />
+                </div>
+
+
+                {{--                        <x-slot:actions>--}}
+                <div class="text-end">
+                    <x-button label="Cancel" @click="$wire.set('shareModal',false)"/>
+                    <x-button type="submit" label="Share" class="btn-primary" spinner="saveFolder"/>
+                </div>
+                {{--                        </x-slot:actions>--}}
+            </div>
+        </x-form>
+
+
+    </x-modal>
 
 </div>
 
@@ -520,11 +534,4 @@ new class extends Component {
 
 @push('scripts')
 
-    {{--        <script>--}}
-    {{--            document.addEventListener('livewire:init',function (){--}}
-    {{--                Livewire.on('statusUpdated',(e) =>{--}}
-    {{--                   console.log(e)--}}
-    {{--                });--}}
-    {{--            })--}}
-    {{--        </script>--}}
 @endpush

@@ -1,18 +1,53 @@
 <?php
 
+use App\Livewire\FolderManager;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Volt\Component;
 use App\Models\File;
+use Illuminate\Support\Facades\Auth;
 
 new class extends Component {
+
+    use FolderManager;
+
     public $fileToView;
     public $fileType;
 
     public function mount($id)
     {
-        $this->fileToView = File::findOrFail($id);
+        $userId = Auth::id();
+
+        // Attempt to find the file based on ownership or sharing
+        $file = File::where('id', $id)
+            ->where(function ($query) use ($userId) {
+                $query->where('user_id', $userId)
+                    ->orWhereHas('shares', fn($q) => $q->where('shared_with_id', $userId));
+            })
+            ->first();
+
+        // If file is found, assign it to fileToView
+        if ($file) {
+            $this->fileToView = $file;
+        } else {
+            // Retrieve the file to check its folder_id if needed
+            $file = File::find($id);
+
+            // Check if the file exists and if its parent folder is shared
+            if ($file && $this->areParentsShared($file->folder_id)) {
+                $this->fileToView = $file;
+            }
+        }
+
+        // Abort with an unauthorized error if the file is still not found
+        if (!$this->fileToView) {
+            abort(403, 'Unauthorized User');
+        }
+
+        // Set the file type
         $this->fileType = $this->getFileType();
     }
+
+
 
     public function getFileType()
     {
@@ -33,7 +68,7 @@ new class extends Component {
 
 {{--</div>--}}
 <div>
-    <x-card :subtitle="$fileToView->name" shadow >
+    <x-card :subtitle="$fileToView->name" shadow>
         <x-slot:menu>
             <x-button x-data @click="history.back()" label="Back" icon="o-arrow-left" class="btn btn-primary btn-sm"/>
         </x-slot:menu>

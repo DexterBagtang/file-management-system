@@ -102,7 +102,8 @@ new class extends Component {
                 </div>
                 <div class="col-span-3 grid gap-3">
                     <x-choices-offline label="My languages" wire:model="my_languages" :options="$languages" searchable/>
-                    <x-editor wire:model="bio" label="Bio" hint="The great biography"/>
+{{--                    <x-editor wire:model="bio" label="Bio" hint="The great biography"/>--}}
+                    <x-textarea wire:model="bio" label="Bio" hint="The great biography"/>
                 </div>
             </div>
 

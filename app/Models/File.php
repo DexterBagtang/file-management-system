@@ -37,4 +37,21 @@ class File extends Model
         return $this->belongsTo(Folder::class);
     }
 
+    public function shares()
+    {
+        return $this->morphMany(SharedItem::class, 'item');
+    }
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::deleting(function ($file) {
+            // Delete related shared items
+            $file->shares()->delete();
+        });
+    }
+
+
+
 }

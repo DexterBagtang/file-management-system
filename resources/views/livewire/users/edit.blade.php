@@ -110,7 +110,8 @@ new class extends Component {
                             :options="$languages"
                             searchable />
 
-                        <x-editor wire:model="bio" label="Bio" hint="The great biography" />
+{{--                        <x-editor wire:model="bio" label="Bio" hint="The great biography" />--}}
+                        <x-textarea wire:model="bio" label="Bio" hint="The great biography" />
                     </div>
                 </div>
 

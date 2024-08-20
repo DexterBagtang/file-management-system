@@ -1,10 +1,12 @@
 <?php
 
+use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Component;
 use App\Models\Folder;
 use App\Models\File;
 use Mary\Traits\Toast;
 use Illuminate\Database\Eloquent\Builder;
+use const Livewire\Attributes\Lazy;
 
 
 new class extends Component {
@@ -17,7 +19,6 @@ new class extends Component {
     public string $selectedTab = 'all';
     public bool $deleteModal = false;
 
-
     public function mergedData()
     {
         $folders = [];
@@ -27,6 +28,7 @@ new class extends Component {
         if ($this->selectedTab == 'all' || $this->selectedTab == 'folders') {
             $foldersQuery = Folder::onlyTrashed()
                 ->select('folders.*', 'users.name as owner', DB::raw("'folder' as type"))
+                ->where('user_id', Auth::id())
                 ->join('users', 'folders.user_id', '=', 'users.id');
 
             if ($this->search) {
@@ -42,6 +44,7 @@ new class extends Component {
         if ($this->selectedTab == 'all' || $this->selectedTab == 'files') {
             $filesQuery = File::onlyTrashed()
                 ->select('files.*', 'users.name as owner', DB::raw("'file' as type"))
+                ->where('user_id', Auth::id())
                 ->join('users', 'files.user_id', '=', 'users.id');
 
             if ($this->search) {
@@ -107,7 +110,7 @@ new class extends Component {
 
         }
 
-        $this->reset(['selected','deleteModal']);
+        $this->reset(['selected', 'deleteModal']);
 
         $this->warning("Selected items deleted forever", 'Good bye!', position: 'toast-bottom');
     }
@@ -127,7 +130,7 @@ new class extends Component {
 
         $this->reset('selected');
 
-        $this->success("Selected items restored",'', position: 'toast-bottom');
+        $this->success("Selected items restored", '', position: 'toast-bottom');
     }
 
     public function with()
@@ -176,10 +179,10 @@ new class extends Component {
         <div class="divider"></div>
 
 
-        <x-selection-actions :formattedJson="$formattedJson" />
+        <x-selection-actions :formattedJson="$formattedJson"/>
 
 
-    @if(count($folderFiles) != 0)
+        @if(count($folderFiles) != 0)
             <x-table :headers="$headers" :rows="$folderFiles" class="table-sm" :sort-by="$sortBy">
 
                 @scope('header_select', $folderFile)
@@ -201,35 +204,35 @@ new class extends Component {
                         📂 {{ Str::limit($folderFile['name'],70) }}
                     </a>
                 @else
-                                        <a href="/files/{{ $folderFile['id'] }}">
-                    <a class="" href="{{Storage::url($folderFile['path'])}}" target="_blank">
-                        📄 {{ Str::limit($folderFile['name'],70) }}
-                    </a>
-                @endif
-                @endscope
+                    <a href="/files/{{ $folderFile['id'] }}">
+                        <a class="" href="{{Storage::url($folderFile['path'])}}" target="_blank">
+                            📄 {{ Str::limit($folderFile['name'],70) }}
+                        </a>
+                        @endif
+                        @endscope
 
-                @scope('cell_deleted_at',$folderFile)
-                <div>
-                    {{\Carbon\Carbon::parse($folderFile['deleted_at'])->diffForHumans()}}
-                </div>
-                @endscope
+                        @scope('cell_deleted_at',$folderFile)
+                        <div>
+                            {{\Carbon\Carbon::parse($folderFile['deleted_at'])->diffForHumans()}}
+                        </div>
+                        @endscope
 
 
-                @scope('actions', $folderFile)
-                <x-dropdown >
-                    <x-slot:trigger>
-                        <x-button icon="o-ellipsis-vertical" class="btn-circle btn-ghost btn-sm"
-                                  @click="$wire.selected = [];$wire.selected.push('{{$folderFile['type'] .'-'. $folderFile['id'] }}')" />
-                    </x-slot:trigger>
+                        @scope('actions', $folderFile)
+                        <x-dropdown>
+                            <x-slot:trigger>
+                                <x-button icon="o-ellipsis-vertical" class="btn-circle btn-ghost btn-sm"
+                                          @click="$wire.selected = [];$wire.selected.push('{{$folderFile['type'] .'-'. $folderFile['id'] }}')"/>
+                            </x-slot:trigger>
 
-                    <x-menu-item title="Delete forever" class="overflow-visible"
-                                 @click="$wire.deleteModal=true;"
-                                 icon="o-trash" />
+                            <x-menu-item title="Delete forever" class="overflow-visible"
+                                         @click="$wire.deleteModal=true;"
+                                         icon="o-trash"/>
 
-                    <x-menu-item wire:click="bulkRestore" spinner class="overflow-visible"
-                                 title="Restore" icon="o-arrow-path" />
-                </x-dropdown>
-                @endscope
+                            <x-menu-item wire:click="bulkRestore" spinner class="overflow-visible"
+                                         title="Restore" icon="o-arrow-path"/>
+                        </x-dropdown>
+                        @endscope
 
             </x-table>
 
@@ -242,12 +245,12 @@ new class extends Component {
         <x-slot:menu>
             <template x-if="$wire.selected.length > 0">
                 <div>
-{{--                    <x-button wire:click="bulkDelete" wire:confirm="Are you sure to deleted the selected items?" spinner--}}
-{{--                              label="Delete Forever" icon="o-trash" responsive class="btn-error"/>--}}
+                    {{--                    <x-button wire:click="bulkDelete" wire:confirm="Are you sure to deleted the selected items?" spinner--}}
+                    {{--                              label="Delete Forever" icon="o-trash" responsive class="btn-error"/>--}}
 
                     <x-button label="Delete forever" icon="o-trash" responsive
                               class="btn-error"
-                              @click="$wire.deleteModal = true" />
+                              @click="$wire.deleteModal = true"/>
 
 
                     <x-button wire:click="bulkRestore"
@@ -266,8 +269,9 @@ new class extends Component {
         <div>Selected items will be deleted forever and you won't be able to restore it.</div>
 
         <x-slot:actions>
-            <x-button label="Cancel" class="btn-outline" @click="$wire.deleteModal = false" />
-            <x-button wire:click="bulkDelete" label="Delete forever" icon="o-trash" class="btn-error rounded-2xl" spinner />
+            <x-button label="Cancel" class="btn-outline" @click="$wire.deleteModal = false"/>
+            <x-button wire:click="bulkDelete" label="Delete forever" icon="o-trash" class="btn-error rounded-2xl"
+                      spinner/>
         </x-slot:actions>
     </x-modal>
 </div>

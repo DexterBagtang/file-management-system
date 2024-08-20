@@ -44,4 +44,24 @@ class Folder extends Model
         return $this->hasMany(Folder::class, 'parent_id');
     }
 
+    public function shares()
+    {
+        return $this->morphMany(SharedItem::class, 'item');
+    }
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::deleting(function ($folder) {
+            // Delete related shared items
+            $folder->shares()->delete();
+
+            // Optionally, handle nested folders
+            foreach ($folder->children as $childFolder) {
+                $childFolder->delete(); // This will trigger the deleting event for the child folders
+            }
+        });
+    }
+
 }
