@@ -1,11 +1,13 @@
 <?php
 
+use App\Livewire\FolderUpload;
 use App\Models\File;
 use App\Models\Folder;
 use App\Models\SharedItem;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
+use Illuminate\Http\Request;
 
 // Users will be redirected to this route if not logged in
 Volt::route('/login', 'login')->name('login');
@@ -36,6 +38,12 @@ Route::middleware('auth')->group(function () {
 
     Volt::route('/shared','shared.index');
     Volt::route('/shared/{id}/show','shared.show');
+
+    Route::get('/folder/upload', FolderUpload::class);
+
+    // routes/web.php
+
+
 
     Route::get('/test-share',function(){
         $folder = Folder::with('shares')->get();

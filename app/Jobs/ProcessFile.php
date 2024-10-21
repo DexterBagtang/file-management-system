@@ -10,14 +10,14 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
-use Intervention\Image\Laravel\Facades\Image;
+//use Intervention\Image\Laravel\Facades\Image;
 use Spatie\PdfToText\Pdf;
 use thiagoalessio\TesseractOCR\TesseractOCR;
-use thiagoalessio\TesseractOCR\UnsuccessfulCommandException;
+//use thiagoalessio\TesseractOCR\UnsuccessfulCommandException;
 
 use Smalot\PdfParser\Parser as PdfParser;
-use lsolesen\pel\PelJpeg;
-use lsolesen\pel\PelTag;
+//use lsolesen\pel\PelJpeg;
+//use lsolesen\pel\PelTag;
 
 class ProcessFile implements ShouldQueue
 {

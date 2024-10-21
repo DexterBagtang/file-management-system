@@ -8,6 +8,7 @@
         "php": "^8.2",
         "ext-exif": "*",
         "algolia/algoliasearch-client-php": "^3.4",
+        "dasundev/livewire-dropzone": "^2.0",
         "http-interop/http-factory-guzzle": "^1.2",
         "laravel/framework": "^11.9",
         "laravel/scout": "^10.11",

@@ -66,29 +66,6 @@ trait FolderManager
 
     }
 
-//    public function buildBreadcrumbs($checkShared = false)
-//    {
-////        dd($this->currentFolder->id);
-//        $this->breadcrumbs = [];
-//        $folder = Folder::find($this->currentFolder->id ?? null);
-//
-//        while ($folder) {
-//            // If we need to check if the folder is shared
-//            if ($checkShared) {
-//                $isShared = SharedItem::where('item_type', 'folder')
-//                    ->where('item_id', $folder->id)
-//                    ->where('shared_with_id', Auth::id())
-//                    ->exists();
-//
-//                if (!$isShared) {
-//                    break; // Stop if the folder is not shared
-//                }
-//            }
-//
-//            array_unshift($this->breadcrumbs, $folder);
-//            $folder = $folder->parent;
-//        }
-//    }
     public function buildBreadcrumbs($checkShared = false)
     {
         $this->breadcrumbs = [];

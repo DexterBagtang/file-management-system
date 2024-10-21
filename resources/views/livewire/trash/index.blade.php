@@ -201,7 +201,7 @@ new class extends Component {
                 @scope('cell_name', $folderFile)
                 @if($folderFile['type'] === 'folder')
                     <a class="truncate" href="/folders/{{ $folderFile['id'] }}/show">
-                        📂 {{ Str::limit($folderFile['name'],70) }}
+                        📂 <span class="hover:underline">{{ Str::limit($folderFile['name'],70) }}</span>
                     </a>
                 @else
                     <a href="/files/{{ $folderFile['id'] }}">

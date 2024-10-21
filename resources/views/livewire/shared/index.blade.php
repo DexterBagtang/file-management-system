@@ -95,13 +95,13 @@ new class extends Component {
             @scope('cell_name', $sharedItem)
             @if($sharedItem['item_type'] === 'folder')
                 <a wire:navigate href="/shared/{{ $sharedItem['item_id'] }}/show">
-                    <div>📂 {{ Str::limit($sharedItem['name'],100) }}</div>
+                    <div>📂 <span class="hover:underline">{{ Str::limit($sharedItem['name'],100) }}</span></div>
                     <small class="ms-2">{{($sharedItem['item_count'] ) .' items'}}</small>
                 </a>
 
             @else
                 <a wire:navigate href="/file/{{$sharedItem['item_id']}}/view">
-                    📄 {{ Str::limit($sharedItem['name'],100) }}
+                    📄 <span class="hover:underline">{{ Str::limit($sharedItem['name'],100) }}</span>
                 </a>
             @endif
             @endscope

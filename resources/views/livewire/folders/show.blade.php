@@ -45,6 +45,24 @@ new class extends Component {
     public bool $renameFile = false;
 
 
+    protected $listeners = [
+        'upload:start' => 'onUploadStart',
+        'upload:finish' => 'onUploadFinish',
+    ];
+
+    public function onUploadStart($totalFiles)
+    {
+        // Handle the start of multiple file upload
+        session()->flash('message', "Starting to upload $totalFiles files...");
+    }
+
+    public function onUploadFinish($totalFiles)
+    {
+        // Handle the completion of multiple file uploads
+        session()->flash('message', "Successfully uploaded $totalFiles files.");
+    }
+
+
     public function mount($id): void
     {
         $this->currentFolder = Folder::where('id', $id)
@@ -262,7 +280,7 @@ new class extends Component {
                 @scope('cell_name', $folderFile)
                 @if($folderFile['type'] === 'folder')
                     <a wire:navigate href="/folders/{{ $folderFile['id'] }}/show">
-                        <div>📂 {{ Str::limit($folderFile['name'],60) }}</div>
+                        <div>📂 <span class="hover:underline">{{ Str::limit($folderFile['name'],60) }}</span></div>
                         <small class="ms-2">{{($folderFile['files_count'] + $folderFile['children_count'] ) .' items'}}</small>
                     </a>
 
@@ -271,7 +289,7 @@ new class extends Component {
                 @else
 
                     <a wire:navigate href="/file/{{$folderFile['id']}}/view">
-                        📄 {{ Str::limit($folderFile['name'],60) }}
+                        📄 <span class="hover:underline">{{ Str::limit($folderFile['name'],60) }}</span>
                     </a>
                 @endif
                 @endscope
@@ -397,6 +415,8 @@ new class extends Component {
                                         required
                                         drop-on-element="false"
                     />
+                    <p x-text="fileCount > 0 ? `Selected files: ${fileCount}` : 'No files selected.'"></p>
+
                     @error("file.*")
                     <x-alert :title="$message" icon="o-exclamation-triangle" class="text-xs alert-error"/>
                     @enderror
@@ -423,7 +443,7 @@ new class extends Component {
             {{--                    <x-progress value="{{$progress}}" max="100" class="progress-primary h-0.5"/>--}}
             {{--                </div>--}}
             {{--            </template>--}}
-            <div class="flex justify-end">
+            <div class="flex justify-start items-center space-x-1 mt-3">
                 <x-button label="Cancel"
                           {{--                              @click="$wire.addFile = false;$wire.cancelModal()"--}}
                           {{--                              @click="$wire.$refresh();$wire.addFile = false;"--}}
@@ -434,6 +454,8 @@ new class extends Component {
                     <span wire:loading wire:target="saveFile">Submitting</span>
                     <span><x-loading wire:loading class="loading-dots"/></span>
                 </button>
+                <small wire:loading  class="text-wrap text-red-600 ms-1">* Please complete the file upload process before submitting.</small>
+
             </div>
         </x-form>
     </x-modal>
@@ -533,5 +555,4 @@ new class extends Component {
 
 
 @push('scripts')
-
 @endpush

@@ -145,7 +145,7 @@ new class extends Component {
             >
 
                 @scope('cell_name',$folder)
-                <div>{{'📂'.$folder->name}}</div>
+                <div>📂 <span class="hover:underline">{{$folder->name}}</span></div>
                 <small class="ms-2">{{($folder->files_count + $folder->children_count ) .' items'}}</small>
                 @endscope
 

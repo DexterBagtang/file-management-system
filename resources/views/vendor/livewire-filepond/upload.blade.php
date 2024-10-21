@@ -82,4 +82,5 @@ $pondProperties = collect($pondProperties)
     }"
 >
     <input type="file" x-ref="input" class="p-5">
+
 </div>

@@ -1,3 +1,5 @@
+/*@import "@dasundev/livewire-dropzone-styles";*/
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

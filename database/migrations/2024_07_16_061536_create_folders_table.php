@@ -17,11 +17,18 @@ return new class extends Migration
             $table->string('name');
             $table->foreignId('parent_id')->nullable()->constrained('folders')->onDelete('cascade');
             $table->timestamps();
-            $table->unique(['parent_id','name','deleted_at']);
             $table->softDeletes();
 
+            // Add indexes
+            $table->index('user_id');
+            $table->index('parent_id');
+            $table->index('name');
+
+            // Unique constraint for parent_id, name, and deleted_at
+            $table->unique(['parent_id', 'name', 'deleted_at']);
         });
     }
+
 
     /**
      * Reverse the migrations.

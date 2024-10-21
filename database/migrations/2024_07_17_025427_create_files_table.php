@@ -22,6 +22,10 @@ return new class extends Migration
             $table->json('metadata')->nullable();
             $table->timestamps();
             $table->softDeletes();
+
+            $table->index('name');
+            $table->index('user_id');
+            $table->index('folder_id');
         });
 
         // Add full-text index

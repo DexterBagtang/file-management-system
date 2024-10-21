@@ -161,13 +161,13 @@ new class extends Component {
                 @scope('cell_name', $folderFile)
                 @if($folderFile['type'] === 'folder')
                     <a wire:navigate href="/shared/{{ $folderFile['id'] }}/show">
-                        <div>📂 {{ Str::limit($folderFile['name'],60) }}</div>
+                        <div>📂 <span class="hover:underline">{{ Str::limit($folderFile['name'],60) }}</span></div>
                         <small class="ms-2">{{($folderFile['files_count'] + $folderFile['children_count'] ) .' items'}}</small>
                     </a>
                 @else
 
                     <a wire:navigate href="/file/{{$folderFile['id']}}/view">
-                        📄 {{ Str::limit($folderFile['name'],60) }}
+                        📄 <span class="hover:underline">{{ Str::limit($folderFile['name'],60) }}</span>
                     </a>
                 @endif
                 @endscope
